@@ -1,0 +1,27 @@
+# PyStereo - standalone AI stereo synthesis (2D to SBS).
+# Inference runs locally via PyTorch. Weights download on first use.
+
+flask
+
+# Core ML runtime
+torch
+torchvision
+numpy
+opencv-contrib-python
+Pillow
+
+# Depth estimation (Depth Anything V2)
+transformers
+
+# Foreground segmentation (BiRefNet) for depth healing
+kornia
+timm
+
+# Inpainting backends
+simple-lama-inpainting
+
+# HuggingFace Hub (via transformers, but pin for download manager)
+huggingface_hub
+
+# Optional: Qt desktop GUI
+# PySide6-Essentials
