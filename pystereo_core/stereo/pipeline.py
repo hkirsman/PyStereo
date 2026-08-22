@@ -14,7 +14,7 @@ and composes the final SBS image.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, NamedTuple
 
 import cv2
 import numpy as np
@@ -34,6 +34,22 @@ logger = logging.getLogger(__name__)
 
 def _compose_sbs(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     return np.concatenate([left, right], axis=1)
+
+
+class _PreparedInput(NamedTuple):
+    """Preprocessed arrays ready for a stereo method."""
+    rgb_arr: np.ndarray
+    depth_f32: np.ndarray
+    max_disp: float
+    fg_mask: np.ndarray | None
+    method_name: str
+    stereo_method: BaseStereoMethod
+
+
+class WarpPreviewResult(NamedTuple):
+    """Pre-inpaint warp preview images."""
+    warp_sbs: Image.Image
+    mask_sbs: Image.Image
 
 
 class StereoPipeline:
@@ -65,43 +81,27 @@ class StereoPipeline:
             self._methods[name] = get_method(name)
         return self._methods[name]
 
-    def synthesize(
+    def _preprocess(
         self,
         image: Image.Image,
         depth_map: Image.Image | np.ndarray,
         *,
         divergence_ratio: float | None = None,
         method: StereoMethodName | None = None,
-    ) -> Image.Image:
-        """Build a horizontal SBS stereo image from a 2D photo + depth map.
-
-        Parameters
-        ----------
-        image:
-            Source RGB photo.
-        depth_map:
-            Grayscale depth — PIL ``L`` (uint8, 255 = closest) or
-            float32 ndarray ``(H, W)`` in [0, 1] (1.0 = closest).
-        divergence_ratio:
-            Optional override for max separation as fraction of width.
-        method:
-            Override the stereo method for this call (ignores settings).
-        """
+    ) -> _PreparedInput:
+        """Shared preprocessing: resize, depth healing, filter, gamma, disparity."""
         method_name = method or self.settings.stereo_method
         stereo_method = self._get_method(method_name)
 
         rgb = image.convert("RGB")
         orig_w, orig_h = rgb.size
 
-        # --- Parse depth into float32 [0, 1] ---
         if isinstance(depth_map, np.ndarray):
             depth_f32 = depth_map.astype(np.float32)
         else:
             depth_f32 = np.array(depth_map.convert("L"), dtype=np.float32) / 255.0
 
-        # --- Resize to processing resolution ---
         if stereo_method.wants_full_res:
-            scale = 1.0
             logger.info(
                 "Stereo [%s]: full-res bypass (%dx%d), method handles its own scaling",
                 method_name, orig_w, orig_h,
@@ -118,19 +118,13 @@ class StereoPipeline:
                 "Stereo processing scale %.3f (%dx%d → %dx%d)",
                 scale, orig_w, orig_h, new_w, new_h,
             )
-        else:
-            scale = 1.0
 
         rgb_arr = np.array(rgb)
 
-        # --- Normalise depth to full [0, 1] ---
         lo, hi = float(depth_f32.min()), float(depth_f32.max())
         if hi > lo:
             depth_f32 = (depth_f32 - lo) / (hi - lo)
 
-        # --- Composite depth healing (BiRefNet) ---
-        # BiRefNet's HF modeling file imports kornia + timm; if either is
-        # missing, skip healing rather than failing the whole SBS request.
         fg_mask: np.ndarray | None = None
         if self.settings.depth_healing:
             try:
@@ -152,7 +146,6 @@ class StereoPipeline:
                 )
                 fg_mask = None
 
-        # --- Guided-filter refinement + gamma ---
         depth_f32 = guided_filter_depth(
             depth_f32,
             rgb_arr,
@@ -183,13 +176,11 @@ class StereoPipeline:
             self.settings.depth_healing,
         )
 
-        # --- Method-specific warp + fill ---
-        left, right = stereo_method.warp_and_fill(
-            rgb_arr, depth_f32, max_disp, fg_mask,
-            self.settings, self._inpainter,
-        )
+        return _PreparedInput(rgb_arr, depth_f32, max_disp, fg_mask,
+                              method_name, stereo_method)
 
-        # Release intermediate GPU tensors cached by LaMa / BiRefNet.
+    @staticmethod
+    def _release_gpu_cache() -> None:
         try:
             import torch
             if hasattr(torch, "mps") and torch.backends.mps.is_available():
@@ -199,10 +190,63 @@ class StereoPipeline:
         except Exception:
             pass
 
-        sbs_arr = _compose_sbs(left, right)
-        sbs = Image.fromarray(sbs_arr)
+    def synthesize(
+        self,
+        image: Image.Image,
+        depth_map: Image.Image | np.ndarray,
+        *,
+        divergence_ratio: float | None = None,
+        method: StereoMethodName | None = None,
+    ) -> Image.Image:
+        """Build a horizontal SBS stereo image from a 2D photo + depth map.
 
-        return sbs
+        Parameters
+        ----------
+        image:
+            Source RGB photo.
+        depth_map:
+            Grayscale depth — PIL ``L`` (uint8, 255 = closest) or
+            float32 ndarray ``(H, W)`` in [0, 1] (1.0 = closest).
+        divergence_ratio:
+            Optional override for max separation as fraction of width.
+        method:
+            Override the stereo method for this call (ignores settings).
+        """
+        p = self._preprocess(
+            image, depth_map,
+            divergence_ratio=divergence_ratio, method=method,
+        )
+
+        left, right = p.stereo_method.warp_and_fill(
+            p.rgb_arr, p.depth_f32, p.max_disp, p.fg_mask,
+            self.settings, self._inpainter,
+        )
+
+        self._release_gpu_cache()
+
+        sbs_arr = _compose_sbs(left, right)
+        return Image.fromarray(sbs_arr)
+
+    def warp_preview(
+        self,
+        image: Image.Image,
+        depth_map: Image.Image | np.ndarray,
+        *,
+        method: StereoMethodName | None = None,
+    ) -> WarpPreviewResult | None:
+        """Return pre-inpaint warp SBS + mask SBS, or None if unsupported."""
+        p = self._preprocess(image, depth_map, method=method)
+
+        result = p.stereo_method.warp_preview(
+            p.rgb_arr, p.depth_f32, p.max_disp, p.fg_mask, self.settings,
+        )
+        if result is None:
+            return None
+
+        left, right, left_mask, right_mask = result
+        warp_sbs = Image.fromarray(_compose_sbs(left, right))
+        mask_sbs = Image.fromarray(_compose_sbs(left_mask, right_mask))
+        return WarpPreviewResult(warp_sbs, mask_sbs)
 
     def synthesize_with_depth_estimator(
         self,

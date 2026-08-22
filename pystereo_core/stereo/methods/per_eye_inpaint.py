@@ -34,15 +34,14 @@ class PerEyeInpaintMethod(BaseStereoMethod):
         "depth_healing_mask_dilate_px": 25,
     }
 
-    def warp_and_fill(
+    def _warp_eyes(
         self,
         rgb_arr: np.ndarray,
         depth_f32: np.ndarray,
         max_disp: float,
-        fg_mask: np.ndarray | None,
         settings: StereoSettings,
-        inpainter: InpaintBackend,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Warp both eyes and dilate occlusion masks."""
         left, left_mask = inverse_remap_warp_eye(
             rgb_arr, depth_f32, max_disp, "left"
         )
@@ -58,7 +57,41 @@ class PerEyeInpaintMethod(BaseStereoMethod):
                 right_mask, settings.inpaint_mask_dilate_px
             )
 
+        return left, right, left_mask, right_mask
+
+    def warp_and_fill(
+        self,
+        rgb_arr: np.ndarray,
+        depth_f32: np.ndarray,
+        max_disp: float,
+        fg_mask: np.ndarray | None,
+        settings: StereoSettings,
+        inpainter: InpaintBackend,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        left, right, left_mask, right_mask = self._warp_eyes(
+            rgb_arr, depth_f32, max_disp, settings,
+        )
+
         left = inpainter.inpaint(left, left_mask)
         right = inpainter.inpaint(right, right_mask)
 
         return left, right
+
+    def warp_preview(
+        self,
+        rgb_arr: np.ndarray,
+        depth_f32: np.ndarray,
+        max_disp: float,
+        fg_mask: np.ndarray | None,
+        settings: StereoSettings,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+        left, right, left_mask, right_mask = self._warp_eyes(
+            rgb_arr, depth_f32, max_disp, settings,
+        )
+
+        # Zero out masked pixels so disocclusion holes are visible as black
+        # (cv2.remap fills them with stretched interpolation otherwise).
+        left[left_mask > 0] = 0
+        right[right_mask > 0] = 0
+
+        return left, right, left_mask, right_mask

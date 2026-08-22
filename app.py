@@ -456,19 +456,23 @@ def api_generate() -> Any:
                 return jsonify({"error": "Depth model not loaded"}), 503
 
             # Generate depth map
-            if hasattr(depth_estimator, "process_raw"):
-                import numpy as np
+            import numpy as np
 
+            if hasattr(depth_estimator, "process_raw"):
                 depth_f32 = depth_estimator.process_raw(rgb_pil)
                 depth_u8 = (depth_f32 * 255).clip(0, 255).astype(np.uint8)
                 depth_pil = Image.fromarray(depth_u8, mode="L")
             else:
                 depth_pil = depth_estimator.process(rgb_pil)
+                depth_f32 = np.array(
+                    depth_pil.convert("L"), dtype=np.float32,
+                ) / 255.0
 
             depth_pil.save(str(result_dir / "depth.png"))
 
-            # Generate SBS
+            # Resolve pipeline (with optional max_dim override)
             pipeline = _get_pipeline()
+            active_pipeline = pipeline
             if max_dim_raw:
                 try:
                     max_dim = max(512, int(max_dim_raw))
@@ -478,19 +482,24 @@ def api_generate() -> Any:
                     from pystereo_core.stereo.pipeline import StereoPipeline
 
                     settings = dc_replace(pipeline.settings, max_processing_dim=max_dim)
-                    local_pipeline = StereoPipeline(settings=settings)
-                    sbs_img = local_pipeline.synthesize_with_depth_estimator(
-                        rgb_pil, depth_estimator, method=method_override,
-                    )
+                    active_pipeline = StereoPipeline(settings=settings)
                 except ValueError:
-                    sbs_img = pipeline.synthesize_with_depth_estimator(
-                        rgb_pil, depth_estimator, method=method_override,
-                    )
-            else:
-                sbs_img = pipeline.synthesize_with_depth_estimator(
-                    rgb_pil, depth_estimator, method=method_override,
-                )
+                    pass
 
+            # Warp preview (pre-inpaint intermediates)
+            warp_result = active_pipeline.warp_preview(
+                rgb_pil, depth_f32, method=method_override,
+            )
+            if warp_result is not None:
+                warp_result.warp_sbs.save(
+                    str(result_dir / "warp.jpg"), quality=95,
+                )
+                warp_result.mask_sbs.save(str(result_dir / "mask.png"))
+
+            # Generate SBS
+            sbs_img = active_pipeline.synthesize(
+                rgb_pil, depth_f32, method=method_override,
+            )
             sbs_img.save(str(result_dir / "sbs.jpg"), quality=95)
 
     except Exception:
@@ -506,12 +515,12 @@ def api_generate() -> Any:
         "created": datetime.now(timezone.utc).isoformat(),
         "width": w,
         "height": h,
-        "method": method_override or pipeline.settings.stereo_method,
+        "method": method_override or active_pipeline.settings.stereo_method,
         "elapsed_seconds": elapsed,
     }
     (result_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
-    return jsonify({
+    resp: dict[str, Any] = {
         "id": result_id,
         "sbs_url": f"/api/results/{result_id}/sbs.jpg",
         "depth_url": f"/api/results/{result_id}/depth.png",
@@ -520,7 +529,12 @@ def api_generate() -> Any:
         "width": w,
         "height": h,
         "elapsed_seconds": elapsed,
-    })
+    }
+    if warp_result is not None:
+        resp["warp_url"] = f"/api/results/{result_id}/warp.jpg"
+        resp["mask_url"] = f"/api/results/{result_id}/mask.png"
+
+    return jsonify(resp)
 
 
 # ---------------------------------------------------------------------------

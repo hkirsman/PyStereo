@@ -64,3 +64,29 @@ class BaseStereoMethod(ABC):
         right:
             ``(H, W, 3)`` uint8 RGB — right eye view, holes filled.
         """
+
+    def warp_preview(
+        self,
+        rgb_arr: np.ndarray,
+        depth_f32: np.ndarray,
+        max_disp: float,
+        fg_mask: np.ndarray | None,
+        settings: StereoSettings,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+        """Return warped eyes and occlusion masks *before* inpainting.
+
+        Subclasses override to expose pre-inpaint intermediates.
+        Returns ``None`` when the method does not support preview.
+
+        Returns
+        -------
+        left:
+            ``(H, W, 3)`` uint8 RGB — left eye, holes are black.
+        right:
+            ``(H, W, 3)`` uint8 RGB — right eye, holes are black.
+        left_mask:
+            ``(H, W)`` uint8 — 255 = hole, 0 = valid.
+        right_mask:
+            ``(H, W)`` uint8 — 255 = hole, 0 = valid.
+        """
+        return None

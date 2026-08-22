@@ -32,6 +32,8 @@ const stageOriginal = $("#stageOriginal");
 const stageOriginalImg = $("#stageOriginalImg");
 const stageDepth = $("#stageDepth");
 const stageDepthImg = $("#stageDepthImg");
+const stageWarp = $("#stageWarp");
+const stageWarpImg = $("#stageWarpImg");
 const stageSbs = $("#stageSbs");
 const stageSbsImg = $("#stageSbsImg");
 const stageTiming = $("#stageTiming");
@@ -266,6 +268,7 @@ btnGenerate.addEventListener("click", async () => {
   stageOriginal.hidden = false;
   stageOriginalImg.src = URL.createObjectURL(selectedFile);
   stageDepth.hidden = true;
+  stageWarp.hidden = true;
   stageSbs.hidden = true;
   stageTiming.textContent = "";
 
@@ -292,6 +295,12 @@ btnGenerate.addEventListener("click", async () => {
     if (data.depth_url) {
       stageDepthImg.src = data.depth_url;
       stageDepth.hidden = false;
+    }
+
+    // Show warp preview (pre-inpaint)
+    if (data.warp_url) {
+      stageWarpImg.src = data.warp_url;
+      stageWarp.hidden = false;
     }
 
     // Show SBS
