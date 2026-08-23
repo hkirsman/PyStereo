@@ -43,6 +43,8 @@ const stageTiming = $("#stageTiming");
 // -- State ------------------------------------------------------------------
 
 let selectedFile = null;
+let previewObjectUrl = null;
+let stageOriginalObjectUrl = null;
 let modelReady = false;
 let generating = false;
 let pollTimer = null;
@@ -281,8 +283,9 @@ fileInput.addEventListener("change", () => {
 function selectFile(file) {
   if (!file.type.startsWith("image/") && !file.name.match(/\.(heic|heif)$/i)) return;
   selectedFile = file;
-  const url = URL.createObjectURL(file);
-  previewImg.src = url;
+  if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+  previewObjectUrl = URL.createObjectURL(file);
+  previewImg.src = previewObjectUrl;
   previewImg.classList.remove("hidden");
   dropZone.classList.add("has-preview");
   updateGenerateBtn();
@@ -388,7 +391,9 @@ btnGenerate.addEventListener("click", async () => {
   pipelinePlaceholder.classList.add("hidden");
   pipelineStages.classList.remove("hidden");
   stageOriginal.hidden = false;
-  stageOriginalImg.src = URL.createObjectURL(selectedFile);
+  if (stageOriginalObjectUrl) URL.revokeObjectURL(stageOriginalObjectUrl);
+  stageOriginalObjectUrl = URL.createObjectURL(selectedFile);
+  stageOriginalImg.src = stageOriginalObjectUrl;
   stageDepth.hidden = true;
   stageWarp.hidden = true;
   stageSbs.hidden = true;

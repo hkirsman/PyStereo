@@ -143,6 +143,13 @@ def _cli_main() -> int:
         help="Output directory for SBS images (default: next to each image)",
     )
     p.add_argument(
+        "--inpaint",
+        type=str,
+        choices=("lama", "opencv", "none", "aotgan", "flux"),
+        default=None,
+        help="Occlusion inpainting backend (default: lama)",
+    )
+    p.add_argument(
         "--depth-model",
         type=str,
         default="small",
@@ -187,10 +194,10 @@ def _cli_main() -> int:
     from dataclasses import replace as dc_replace
 
     settings = StereoSettings.from_env(method=args.method)
-    settings = dc_replace(
-        settings,
-        max_processing_dim=args.max_dim,
-    )
+    overrides: dict = {"max_processing_dim": args.max_dim}
+    if args.inpaint is not None:
+        overrides["inpaint_backend"] = args.inpaint
+    settings = dc_replace(settings, **overrides)
     pipeline = StereoPipeline(settings=settings)
 
     IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tiff", ".tif"}
