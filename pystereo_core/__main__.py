@@ -142,6 +142,13 @@ def _cli_main() -> int:
         default=None,
         help="Output directory for SBS images (default: next to each image)",
     )
+    p.add_argument(
+        "--depth-model",
+        type=str,
+        default="small",
+        choices=["small", "base", "large"],
+        help="Depth Anything V2 model size (default: small)",
+    )
     args = p.parse_args()
 
     if args.download_model and args.remove_model:
@@ -174,13 +181,16 @@ def _cli_main() -> int:
 
     registry = get_registry()
     registry.detect_gpu()
-    registry.register(DepthEstimator())
+    registry.register(DepthEstimator(model_size=args.depth_model))
     registry.enabled = True
 
     from dataclasses import replace as dc_replace
 
     settings = StereoSettings.from_env(method=args.method)
-    settings = dc_replace(settings, max_processing_dim=args.max_dim)
+    settings = dc_replace(
+        settings,
+        max_processing_dim=args.max_dim,
+    )
     pipeline = StereoPipeline(settings=settings)
 
     IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tiff", ".tif"}

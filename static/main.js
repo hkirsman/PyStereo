@@ -19,6 +19,8 @@ const gateHint = $(".model-gate-hint");
 const dropZone = $("#dropZone");
 const fileInput = $("#fileInput");
 const previewImg = $("#previewImg");
+const depthModelSelect = $("#depthModelSelect");
+const btnDownloadDepth = $("#btnDownloadDepth");
 const methodSelect = $("#methodSelect");
 const maxDimSlider = $("#maxDimSlider");
 const maxDimValue = $("#maxDimValue");
@@ -44,6 +46,7 @@ let selectedFile = null;
 let modelReady = false;
 let generating = false;
 let pollTimer = null;
+let depthModelStatus = {};
 
 // -- Formatting helpers -----------------------------------------------------
 
@@ -188,6 +191,69 @@ btnModelRemove.addEventListener("click", async () => {
   }
 });
 
+// -- Depth model selector ---------------------------------------------------
+
+async function loadDepthModels() {
+  try {
+    const res = await fetch("/api/depth-models");
+    if (!res.ok) return;
+    const models = await res.json();
+    for (const m of models) {
+      depthModelStatus[m.size] = m.downloaded;
+    }
+    updateDepthDownloadBtn();
+  } catch {
+    // Fall back to default
+  }
+}
+
+function updateDepthDownloadBtn() {
+  const size = depthModelSelect.value;
+  const downloaded = depthModelStatus[size];
+  if (downloaded === false) {
+    btnDownloadDepth.hidden = false;
+    btnDownloadDepth.disabled = false;
+    btnDownloadDepth.textContent = "Download";
+  } else {
+    btnDownloadDepth.hidden = true;
+  }
+}
+
+btnDownloadDepth.addEventListener("click", async () => {
+  const size = depthModelSelect.value;
+  btnDownloadDepth.disabled = true;
+  btnDownloadDepth.textContent = "Downloading...";
+  try {
+    const res = await fetch("/api/depth-models/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: size }),
+    });
+    const data = await res.json();
+    if (data.status === "ready") {
+      depthModelStatus[size] = true;
+      btnDownloadDepth.hidden = true;
+    } else {
+      schedulePoll(1500);
+      const waitForDownload = async () => {
+        const r = await fetch("/api/depth-models");
+        if (!r.ok) return;
+        const models = await r.json();
+        for (const m of models) depthModelStatus[m.size] = m.downloaded;
+        if (depthModelStatus[size]) {
+          updateDepthDownloadBtn();
+        } else {
+          setTimeout(waitForDownload, 2000);
+        }
+      };
+      setTimeout(waitForDownload, 2000);
+    }
+  } catch {
+    btnDownloadDepth.disabled = false;
+    btnDownloadDepth.textContent = "Download";
+  }
+});
+
 // -- File input -------------------------------------------------------------
 
 dropZone.addEventListener("click", () => fileInput.click());
@@ -224,8 +290,57 @@ function selectFile(file) {
 
 // -- Settings ---------------------------------------------------------------
 
+let saveSettingsTimer = null;
+
+function saveSettings() {
+  if (saveSettingsTimer) clearTimeout(saveSettingsTimer);
+  saveSettingsTimer = setTimeout(async () => {
+    const body = {
+      depth_model: depthModelSelect.value,
+      max_dim: parseInt(maxDimSlider.value, 10),
+      method: methodSelect.value,
+    };
+    try {
+      await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      // Best-effort persistence
+    }
+  }, 400);
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch("/api/settings");
+    if (!res.ok) return;
+    const s = await res.json();
+    if (s.depth_model) depthModelSelect.value = s.depth_model;
+    if (s.max_dim != null) {
+      maxDimSlider.value = s.max_dim;
+      maxDimValue.textContent = s.max_dim;
+    }
+    if (s.method) methodSelect.value = s.method;
+    updateDepthDownloadBtn();
+  } catch {
+    // Use defaults
+  }
+}
+
 maxDimSlider.addEventListener("input", () => {
   maxDimValue.textContent = maxDimSlider.value;
+  saveSettings();
+});
+
+depthModelSelect.addEventListener("change", () => {
+  updateDepthDownloadBtn();
+  saveSettings();
+});
+
+methodSelect.addEventListener("change", () => {
+  saveSettings();
 });
 
 async function loadMethods() {
@@ -259,6 +374,13 @@ function setStatus(text, busy, isError) {
 
 btnGenerate.addEventListener("click", async () => {
   if (!selectedFile || !modelReady || generating) return;
+
+  const depthModel = depthModelSelect.value;
+  if (depthModelStatus[depthModel] === false) {
+    setStatus("Depth model not downloaded. Click Download first.", false, true);
+    return;
+  }
+
   generating = true;
   updateGenerateBtn();
 
@@ -279,6 +401,7 @@ btnGenerate.addEventListener("click", async () => {
   const method = methodSelect.value;
   if (method) form.append("method", method);
   form.append("max_dim", maxDimSlider.value);
+  form.append("depth_model", depthModel);
 
   try {
     const res = await fetch("/api/generate", { method: "POST", body: form });
@@ -326,5 +449,11 @@ btnGenerate.addEventListener("click", async () => {
 
 // -- Init -------------------------------------------------------------------
 
-loadMethods();
-pollModelStatus();
+async function init() {
+  await loadMethods();
+  await loadDepthModels();
+  await loadSettings();
+  pollModelStatus();
+}
+
+init();

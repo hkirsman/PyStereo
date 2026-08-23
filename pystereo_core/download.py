@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 DEPTH_REPO_ID = "depth-anything/Depth-Anything-V2-Small-hf"
+DEPTH_BASE_REPO_ID = "depth-anything/Depth-Anything-V2-Base-hf"
+DEPTH_LARGE_REPO_ID = "depth-anything/Depth-Anything-V2-Large-hf"
 SEGMENT_REPO_ID = "ZhengPeng7/BiRefNet"
 AOTGAN_REPO_ID = "NimaBoscarino/aot-gan-places2"
 LAMA_MODEL_URL = (
@@ -28,10 +30,14 @@ LAMA_MODEL_URL = (
 # Last-resort size when neither local cache nor remote metadata is available.
 _FALLBACK_BYTES: Dict[str, int] = {
     "depth": 95 * 1024 * 1024,
+    "depth_base": 400 * 1024 * 1024,
+    "depth_large": 1300 * 1024 * 1024,
     "segment": 424 * 1024 * 1024,
     "inpaint": 196 * 1024 * 1024,
     "aotgan": 58 * 1024 * 1024,
 }
+
+DEPTH_MODEL_SPECS: Dict[str, "ArtifactSpec"] = {}  # populated after ArtifactSpec
 
 
 @dataclass(frozen=True)
@@ -71,6 +77,12 @@ STEREO_PACK: List[ArtifactSpec] = [
         repo_id=AOTGAN_REPO_ID,
     ),
 ]
+
+DEPTH_MODEL_SPECS.update({
+    "small": ArtifactSpec(id="depth", name="Depth Anything V2 Small", kind="hf", repo_id=DEPTH_REPO_ID),
+    "base": ArtifactSpec(id="depth_base", name="Depth Anything V2 Base", kind="hf", repo_id=DEPTH_BASE_REPO_ID),
+    "large": ArtifactSpec(id="depth_large", name="Depth Anything V2 Large", kind="hf", repo_id=DEPTH_LARGE_REPO_ID),
+})
 
 
 def _lama_cache_path(url: str) -> Path:
@@ -344,6 +356,7 @@ def _make_progress_tqdm(
             self.total = float(kwargs.get("total") or 0)
             self.desc = str(kwargs.get("desc") or "")
             self.disable = bool(kwargs.get("disable", True))
+            self.format_dict: dict[str, Any] = {}
             self._closed = False
             # Only the shared bytes bar should drive dashboard progress.
             self._report = (
@@ -389,6 +402,9 @@ def _make_progress_tqdm(
                 self.desc = str(desc)
 
         def set_postfix(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+        def set_postfix_str(self, *args: Any, **kwargs: Any) -> None:
             return None
 
         def close(self) -> None:
@@ -546,6 +562,99 @@ class ModelDownloadManager:
             "artifacts": deleted,
             "deleted_paths": deleted_paths,
         }
+
+    def is_depth_model_local(self, model_size: str) -> bool:
+        """Check if a specific depth model's weights are cached locally."""
+        spec = DEPTH_MODEL_SPECS.get(model_size)
+        if spec is None:
+            return False
+        return _artifact_is_local(spec)
+
+    def ensure_depth_model_async(self, model_size: str) -> bool:
+        """Start downloading a specific depth model in the background.
+
+        Returns True if a download was started (or already running),
+        False if the model size is invalid.
+        """
+        spec = DEPTH_MODEL_SPECS.get(model_size)
+        if spec is None:
+            return False
+        if _artifact_is_local(spec):
+            return True
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return True
+            art_id = spec.id
+            if art_id not in self._artifacts:
+                self._artifacts[art_id] = _ArtifactRuntime()
+            self._pack_state = "downloading"
+            self._error = None
+            self._message = f"Downloading {spec.name}…"
+            size = _FALLBACK_BYTES.get(art_id, 0)
+            self._job_bytes_done = 0
+            self._job_bytes_total = size
+            self._file_reported = 0
+            art = self._artifacts[art_id]
+            art.state = "queued"
+            art.percent = 0
+            art.error = None
+            art.bytes_total = size
+            art.bytes_downloaded = 0
+            self._thread = threading.Thread(
+                target=self._run_single_download,
+                args=(spec,),
+                name=f"pystereo-dl-{model_size}",
+                daemon=True,
+            )
+            self._thread.start()
+        return True
+
+    def _run_single_download(self, spec: ArtifactSpec) -> None:
+        """Download a single artifact (used for optional depth models)."""
+        try:
+            if _artifact_is_local(spec):
+                with self._lock:
+                    art = self._artifacts.get(spec.id)
+                    if art:
+                        art.state = "ready"
+                        art.percent = 100
+            else:
+                with self._lock:
+                    self._message = f"Downloading {spec.name}…"
+                    art = self._artifacts.get(spec.id)
+                    if art:
+                        art.state = "downloading"
+                        art.percent = 0
+                    self._file_reported = 0
+                if spec.kind == "hf" and spec.repo_id:
+                    self._download_hf(spec)
+                measured = _measure_local_bytes(spec)
+                with self._lock:
+                    if measured > 0:
+                        self._remember_bytes(spec.id, measured)
+                    art = self._artifacts.get(spec.id)
+                    if art:
+                        art.state = "ready"
+                        art.percent = 100
+                        art.bytes_total = measured or art.bytes_total
+                        art.bytes_downloaded = art.bytes_total
+            with self._lock:
+                self._pack_state = "idle"
+                self._message = f"{spec.name} ready"
+                self._error = None
+            self.refresh_local_state()
+            logger.info("Downloaded %s", spec.name)
+        except Exception as exc:
+            logger.exception("Download of %s failed", spec.name)
+            with self._lock:
+                self._pack_state = "idle"
+                self._error = str(exc)
+                self._message = f"Download failed: {exc}"
+                art = self._artifacts.get(spec.id)
+                if art and art.state == "downloading":
+                    art.state = "error"
+                    art.error = str(exc)
+            self.refresh_local_state()
 
     def ensure_stereo_pack_async(self) -> None:
         """Start a background download if the pack is not already ready."""

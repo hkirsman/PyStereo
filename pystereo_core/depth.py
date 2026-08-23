@@ -22,36 +22,59 @@ from pystereo_core.registry import AIModel
 
 logger = logging.getLogger(__name__)
 
-# Depth Anything V2 Small is Apache-2.0 licensed and safe for commercial use.
-MODEL_ID = "depth-anything/Depth-Anything-V2-Small-hf"
+DEPTH_MODELS: dict[str, dict[str, Any]] = {
+    "small": {
+        "repo_id": "depth-anything/Depth-Anything-V2-Small-hf",
+        "name": "Depth Anything V2 Small",
+        "license": "Apache-2.0",
+        "size_mb": 95,
+    },
+    "base": {
+        "repo_id": "depth-anything/Depth-Anything-V2-Base-hf",
+        "name": "Depth Anything V2 Base",
+        "license": "CC-BY-NC-4.0",
+        "size_mb": 400,
+    },
+    "large": {
+        "repo_id": "depth-anything/Depth-Anything-V2-Large-hf",
+        "name": "Depth Anything V2 Large",
+        "license": "CC-BY-NC-4.0",
+        "size_mb": 1300,
+    },
+}
 
 
 class DepthEstimator(AIModel):
-    """Monocular depth estimation via Depth Anything V2 Small."""
+    """Monocular depth estimation via Depth Anything V2 (Small / Base / Large)."""
 
-    name = "Depth Anything V2 Small"
     capability = "depth"
 
-    def __init__(self) -> None:
+    def __init__(self, model_size: str = "small") -> None:
+        info = DEPTH_MODELS.get(model_size, DEPTH_MODELS["small"])
+        self._model_size = model_size
+        self._model_id: str = info["repo_id"]
+        self.name = info["name"]
         self._pipe: Any = None
         self._device: str = "cpu"
+
+    @property
+    def model_size(self) -> str:
+        return self._model_size
 
     # -- AIModel interface --------------------------------------------------
 
     def load(self, device: str) -> None:
         from transformers import pipeline
 
-        # Normalize device string (e.g. "cpu", "cuda", "mps") to a torch.device
         normalized_device = torch.device(device)
         self._device = device
-        # Weights must already be in the HF cache (see download manager). Never hit the Hub here.
         self._pipe = pipeline(
             task="depth-estimation",
-            model=MODEL_ID,
+            model=self._model_id,
             device=normalized_device,
             local_files_only=True,
         )
-        logger.info("Depth Anything V2 Small loaded on %s", normalized_device)
+        logger.info("%s loaded on %s", self.name, normalized_device)
 
     def unload(self) -> None:
         self._pipe = None

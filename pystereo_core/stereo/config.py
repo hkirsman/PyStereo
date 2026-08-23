@@ -8,8 +8,10 @@ from typing import Any, Literal
 
 InpaintBackendName = Literal["lama", "opencv", "none", "flux", "aotgan"]
 StereoMethodName = Literal["per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill"]
+DepthModelSize = Literal["small", "base", "large"]
 
 DEFAULT_METHOD: StereoMethodName = "per_eye_inpaint"
+DEFAULT_DEPTH_MODEL: DepthModelSize = "small"
 
 
 @dataclass(frozen=True)
@@ -40,7 +42,6 @@ class StereoSettings:
     segmenter_padding: int = 200
     narrow_strip_max_px: int = 12
     bg_plate_tight_dilate_px: int = 10
-
     def with_method_defaults(self) -> StereoSettings:
         """Return a copy with method-specific overrides applied.
 

@@ -384,6 +384,13 @@ body.model-gate-active .app-shell > .layout {
   cursor: not-allowed;
 }
 
+.btn-sm {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
+  width: auto;
+  min-height: 0;
+}
+
 .btn-banner {
   margin: 0;
   padding: 0.45rem 0.9rem;

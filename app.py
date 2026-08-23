@@ -68,6 +68,38 @@ STATIC_DIR = _bundle_root() / "static"
 OUTPUTS_DIR = _outputs_dir()
 PREDICT_LOCK = threading.Lock()
 
+
+def _settings_path() -> Path:
+    """Persistent user settings file, next to outputs."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return OUTPUTS_DIR.parent / "settings.json"
+    return _dev_root() / "settings.json"
+
+
+_USER_SETTINGS_KEYS = frozenset({
+    "depth_model", "max_dim", "method",
+})
+
+
+def _load_user_settings() -> dict[str, Any]:
+    p = _settings_path()
+    if not p.is_file():
+        return {}
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        return {k: v for k, v in raw.items() if k in _USER_SETTINGS_KEYS}
+    except Exception:
+        return {}
+
+
+def _save_user_settings(data: dict[str, Any]) -> None:
+    filtered = {k: v for k, v in data.items() if k in _USER_SETTINGS_KEYS}
+    merged = _load_user_settings()
+    merged.update(filtered)
+    p = _settings_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -122,15 +154,24 @@ def _get_depth_estimator() -> Any:
     return registry.get("depth")
 
 
-def _ensure_registry() -> None:
-    """Register the depth estimator if not already done."""
+def _ensure_registry(model_size: str = "small") -> None:
+    """Register the depth estimator if not already done, or switch model size."""
     from pystereo_core.depth import DepthEstimator
     from pystereo_core.registry import get_registry
 
     registry = get_registry()
+    registry.detect_gpu()
     if not registry.has_capability("depth"):
-        registry.detect_gpu()
-        registry.register(DepthEstimator())
+        registry.register(DepthEstimator(model_size=model_size))
+        return
+
+    existing = registry._models.get("depth")
+    if existing is not None and hasattr(existing, "model_size") and existing.model_size == model_size:
+        return
+
+    if existing is not None and existing.is_loaded():
+        existing.unload()
+    registry.register(DepthEstimator(model_size=model_size))
 
 
 def _get_pipeline() -> Any:
@@ -138,10 +179,21 @@ def _get_pipeline() -> Any:
     global _pipeline_singleton
     with _pipeline_lock:
         if _pipeline_singleton is None:
+            from dataclasses import replace as dc_replace
+
             from pystereo_core.stereo.config import StereoSettings
             from pystereo_core.stereo.pipeline import StereoPipeline
 
             settings = StereoSettings.from_env()
+            saved = _load_user_settings()
+            overrides: dict[str, Any] = {}
+            if "max_dim" in saved:
+                try:
+                    overrides["max_processing_dim"] = max(512, int(saved["max_dim"]))
+                except (ValueError, TypeError):
+                    pass
+            if overrides:
+                settings = dc_replace(settings, **overrides)
             _pipeline_singleton = StereoPipeline(settings=settings)
         return _pipeline_singleton
 
@@ -317,6 +369,93 @@ def api_model_delete() -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Routes - depth models
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/depth-models", methods=["GET"])
+def api_depth_models() -> Any:
+    """Return available depth models and their download status."""
+    from pystereo_core.depth import DEPTH_MODELS
+    from pystereo_core.download import get_download_manager
+
+    mgr = get_download_manager()
+    result = []
+    for size, info in DEPTH_MODELS.items():
+        result.append({
+            "size": size,
+            "name": info["name"],
+            "license": info["license"],
+            "size_mb": info["size_mb"],
+            "downloaded": mgr.is_depth_model_local(size),
+        })
+    return jsonify(result)
+
+
+@app.route("/api/depth-models/download", methods=["POST"])
+def api_depth_model_download() -> Any:
+    """Download a specific depth model (small/base/large)."""
+    from pystereo_core.download import get_download_manager
+
+    model_size = (request.json or {}).get("model", "small") if request.is_json else request.form.get("model", "small")
+    model_size = model_size.strip().lower()
+    if model_size not in ("small", "base", "large"):
+        return jsonify({"error": f"Invalid model: {model_size}"}), 400
+
+    mgr = get_download_manager()
+    if mgr.is_depth_model_local(model_size):
+        return jsonify({"status": "ready", "model": model_size})
+
+    started = mgr.ensure_depth_model_async(model_size)
+    if not started:
+        return jsonify({"error": "Failed to start download"}), 500
+
+    return jsonify({"status": "downloading", "model": model_size})
+
+
+# ---------------------------------------------------------------------------
+# Routes - persistent settings
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/settings", methods=["GET"])
+def api_settings_get() -> Any:
+    return jsonify(_load_user_settings())
+
+
+@app.route("/api/settings", methods=["PUT"])
+def api_settings_put() -> Any:
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
+        return jsonify({"error": "JSON body required"}), 400
+
+    _save_user_settings(data)
+
+    saved = _load_user_settings()
+
+    global _pipeline_singleton
+    with _pipeline_lock:
+        if _pipeline_singleton is not None:
+            from dataclasses import replace as dc_replace
+
+            overrides: dict[str, Any] = {}
+            if "max_dim" in saved:
+                try:
+                    overrides["max_processing_dim"] = max(512, int(saved["max_dim"]))
+                except (ValueError, TypeError):
+                    pass
+            if overrides:
+                _pipeline_singleton.settings = dc_replace(
+                    _pipeline_singleton.settings, **overrides,
+                )
+
+    if "depth_model" in saved:
+        _ensure_registry(model_size=str(saved["depth_model"]))
+
+    return jsonify(saved)
+
+
+# ---------------------------------------------------------------------------
 # Routes - stereo methods
 # ---------------------------------------------------------------------------
 
@@ -351,8 +490,9 @@ def transform() -> Any:
 
     method_override = (request.form.get("method") or "").strip().lower() or None
     max_dim_raw = (request.form.get("max_dim") or "").strip()
+    depth_model = (request.form.get("depth_model") or "small").strip().lower()
 
-    _ensure_registry()
+    _ensure_registry(model_size=depth_model)
     gui_log(f"Generating stereo SBS for {name}...")
 
     t0 = time.perf_counter()
@@ -369,23 +509,23 @@ def transform() -> Any:
 
             pipeline = _get_pipeline()
 
+            overrides: dict[str, Any] = {}
             if max_dim_raw:
                 try:
-                    max_dim = max(512, int(max_dim_raw))
-                    from dataclasses import replace as dc_replace
-
-                    from pystereo_core.stereo.config import StereoSettings
-                    from pystereo_core.stereo.pipeline import StereoPipeline
-
-                    settings = dc_replace(pipeline.settings, max_processing_dim=max_dim)
-                    local_pipeline = StereoPipeline(settings=settings)
-                    sbs_img = local_pipeline.synthesize_with_depth_estimator(
-                        rgb_pil, depth_estimator, method=method_override,
-                    )
+                    overrides["max_processing_dim"] = max(512, int(max_dim_raw))
                 except ValueError:
-                    sbs_img = pipeline.synthesize_with_depth_estimator(
-                        rgb_pil, depth_estimator, method=method_override,
-                    )
+                    pass
+
+            if overrides:
+                from dataclasses import replace as dc_replace
+
+                from pystereo_core.stereo.pipeline import StereoPipeline
+
+                settings = dc_replace(pipeline.settings, **overrides)
+                local_pipeline = StereoPipeline(settings=settings)
+                sbs_img = local_pipeline.synthesize_with_depth_estimator(
+                    rgb_pil, depth_estimator, method=method_override,
+                )
             else:
                 sbs_img = pipeline.synthesize_with_depth_estimator(
                     rgb_pil, depth_estimator, method=method_override,
@@ -432,7 +572,7 @@ def api_generate() -> Any:
 
     method_override = (request.form.get("method") or "").strip().lower() or None
     max_dim_raw = (request.form.get("max_dim") or "").strip()
-
+    depth_model = (request.form.get("depth_model") or "small").strip().lower()
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     result_id = str(uuid.uuid4())
     result_dir = OUTPUTS_DIR / result_id
@@ -442,7 +582,7 @@ def api_generate() -> Any:
     input_path = result_dir / f"input{ext}"
     upload.save(str(input_path))
 
-    _ensure_registry()
+    _ensure_registry(model_size=depth_model)
 
     t0 = time.perf_counter()
     try:
@@ -470,21 +610,22 @@ def api_generate() -> Any:
 
             depth_pil.save(str(result_dir / "depth.png"))
 
-            # Resolve pipeline (with optional max_dim override)
+            # Resolve pipeline with per-request overrides
             pipeline = _get_pipeline()
-            active_pipeline = pipeline
+            overrides: dict[str, Any] = {}
             if max_dim_raw:
                 try:
-                    max_dim = max(512, int(max_dim_raw))
-                    from dataclasses import replace as dc_replace
-
-                    from pystereo_core.stereo.config import StereoSettings
-                    from pystereo_core.stereo.pipeline import StereoPipeline
-
-                    settings = dc_replace(pipeline.settings, max_processing_dim=max_dim)
-                    active_pipeline = StereoPipeline(settings=settings)
+                    overrides["max_processing_dim"] = max(512, int(max_dim_raw))
                 except ValueError:
                     pass
+            if overrides:
+                from dataclasses import replace as dc_replace
+
+                from pystereo_core.stereo.pipeline import StereoPipeline
+
+                active_pipeline = StereoPipeline(settings=dc_replace(pipeline.settings, **overrides))
+            else:
+                active_pipeline = pipeline
 
             # Warp preview (pre-inpaint intermediates)
             warp_result = active_pipeline.warp_preview(
@@ -533,7 +674,6 @@ def api_generate() -> Any:
     if warp_result is not None:
         resp["warp_url"] = f"/api/results/{result_id}/warp.jpg"
         resp["mask_url"] = f"/api/results/{result_id}/mask.png"
-
     return jsonify(resp)
 
 

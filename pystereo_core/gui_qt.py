@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import queue
 import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -32,6 +35,41 @@ from PySide6.QtWidgets import (
 logger = logging.getLogger(__name__)
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".tiff", ".tif"}
+
+_SETTINGS_KEYS = frozenset({
+    "depth_model", "max_dim", "method",
+})
+
+
+def _settings_path() -> Path:
+    root = Path(__file__).resolve().parent.parent
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        if sys.platform == "darwin":
+            return Path.home() / "Library" / "Application Support" / "PyStereo" / "settings.json"
+        local = os.environ.get("LOCALAPPDATA") if sys.platform == "win32" else None
+        if local:
+            return Path(local) / "PyStereo" / "settings.json"
+        return root / "settings.json"
+    return root / "settings.json"
+
+
+def _load_settings() -> dict[str, Any]:
+    p = _settings_path()
+    if not p.is_file():
+        return {}
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        return {k: v for k, v in raw.items() if k in _SETTINGS_KEYS}
+    except Exception:
+        return {}
+
+
+def _save_settings(data: dict[str, Any]) -> None:
+    merged = _load_settings()
+    merged.update({k: v for k, v in data.items() if k in _SETTINGS_KEYS})
+    p = _settings_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(merged, indent=2), encoding="utf-8")
 
 
 class _Bridge(QObject):
@@ -122,6 +160,13 @@ class PyStereoQtWindow(QMainWindow):
         self._recursive_chk = QCheckBox("Include subfolders")
         self._recursive_chk.setChecked(True)
         row2.addWidget(self._recursive_chk)
+        row2.addWidget(QLabel("Depth model"))
+        self._depth_model_combo = QComboBox()
+        self._depth_model_combo.setMinimumWidth(140)
+        self._depth_model_combo.addItem("Small (~95 MB)", "small")
+        self._depth_model_combo.addItem("Base (~400 MB)", "base")
+        self._depth_model_combo.addItem("Large (~1.3 GB)", "large")
+        row2.addWidget(self._depth_model_combo)
         row2.addWidget(QLabel("Method"))
         self._method_combo = QComboBox()
         self._method_combo.setMinimumWidth(160)
@@ -189,10 +234,38 @@ class PyStereoQtWindow(QMainWindow):
         layout.addWidget(self._log, stretch=1)
 
         self._populate_methods()
+        self._load_saved_settings()
+
+        self._depth_model_combo.currentIndexChanged.connect(self._on_setting_changed)
+        self._method_combo.currentIndexChanged.connect(self._on_setting_changed)
+        self._max_dim_spin.valueChanged.connect(self._on_setting_changed)
         self._model_timer = QTimer(self)
         self._model_timer.timeout.connect(self._poll_model)
         self._model_timer.start(1500)
         self._poll_model()
+
+    def _load_saved_settings(self) -> None:
+        s = _load_settings()
+        if "depth_model" in s:
+            idx = self._depth_model_combo.findData(s["depth_model"])
+            if idx >= 0:
+                self._depth_model_combo.setCurrentIndex(idx)
+        if "max_dim" in s:
+            try:
+                self._max_dim_spin.setValue(int(s["max_dim"]))
+            except (ValueError, TypeError):
+                pass
+        if "method" in s:
+            idx = self._method_combo.findData(s["method"])
+            if idx >= 0:
+                self._method_combo.setCurrentIndex(idx)
+
+    def _on_setting_changed(self) -> None:
+        _save_settings({
+            "depth_model": self._depth_model_combo.currentData() or "small",
+            "max_dim": self._max_dim_spin.value(),
+            "method": self._method_combo.currentData() or "",
+        })
 
     def _populate_methods(self) -> None:
         try:
@@ -330,6 +403,7 @@ class PyStereoQtWindow(QMainWindow):
 
         method = self._method_combo.currentData() or "per_eye_inpaint"
         max_dim = self._max_dim_spin.value()
+        depth_model_size = self._depth_model_combo.currentData() or "small"
         output_dir = None
         if self._output_chk.isChecked():
             od = self._output_edit.text().strip()
@@ -339,7 +413,7 @@ class PyStereoQtWindow(QMainWindow):
 
         t = threading.Thread(
             target=self._batch_worker,
-            args=(images, method, max_dim, output_dir),
+            args=(images, method, max_dim, depth_model_size, output_dir),
             daemon=True,
         )
         t.start()
@@ -349,6 +423,7 @@ class PyStereoQtWindow(QMainWindow):
         images: list[Path],
         method: str,
         max_dim: int,
+        depth_model_size: str,
         output_dir: Path | None,
     ) -> None:
         import numpy as np
@@ -362,13 +437,22 @@ class PyStereoQtWindow(QMainWindow):
         registry = get_registry()
         registry.detect_gpu()
         if not registry.has_capability("depth"):
-            registry.register(DepthEstimator())
+            registry.register(DepthEstimator(model_size=depth_model_size))
+        else:
+            current = registry._models.get("depth")
+            if current and hasattr(current, "model_size") and current.model_size != depth_model_size:
+                if current.is_loaded():
+                    current.unload()
+                registry.register(DepthEstimator(model_size=depth_model_size))
         registry.enabled = True
 
         from dataclasses import replace as dc_replace
 
         settings = StereoSettings.from_env(method=method)
-        settings = dc_replace(settings, max_processing_dim=max_dim)
+        settings = dc_replace(
+            settings,
+            max_processing_dim=max_dim,
+        )
         pipeline = StereoPipeline(settings=settings)
 
         depth_model = registry.get("depth")
