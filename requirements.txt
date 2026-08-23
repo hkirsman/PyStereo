@@ -16,6 +16,7 @@ transformers
 # Foreground segmentation (BiRefNet) for depth healing
 kornia
 timm
+einops
 
 # Inpainting backends
 simple-lama-inpainting
