@@ -45,7 +45,7 @@ class StereoSettings:
     def with_method_defaults(self) -> StereoSettings:
         """Return a copy with method-specific overrides applied.
 
-        Only overrides fields that were not explicitly set via env vars.
+        Method overrides (``SETTING_OVERRIDES``) are applied unconditionally.
         """
         from pystereo_core.stereo.methods import available_methods
 
@@ -66,7 +66,8 @@ class StereoSettings:
     def from_env(cls, *, method: StereoMethodName | None = None) -> StereoSettings:
         """Build settings from environment variables.
 
-        Method-specific defaults are applied first, then env vars override.
+        Apply primary env vars, then method ``SETTING_OVERRIDES``, then
+        optional tuning env overrides.
         """
         method_raw = method or os.environ.get("PYSTEREO_METHOD", "").strip().lower()
         stereo_method: StereoMethodName = DEFAULT_METHOD
