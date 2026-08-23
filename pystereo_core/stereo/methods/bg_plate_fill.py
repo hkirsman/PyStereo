@@ -9,7 +9,7 @@ Two-pass inpainting:
 1. Tight LaMa mask (10 px dilation) for maximum quality with most context.
 2. Telea to extend fill to full disocclusion width.
 
-Set ``bg_plate_tight_dilate_px`` to 0 (``VAELA_STEREO_TIGHT_DILATE=0``) to
+Set ``bg_plate_tight_dilate_px`` to 0 (``PYSTEREO_TIGHT_DILATE=0``) to
 inpaint the full-width mask in a single LaMa pass instead.
 
 Includes spatially-varying colour correction and UnsharpMask on fills.

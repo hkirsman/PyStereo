@@ -44,7 +44,7 @@ class DepthEstimator(AIModel):
         # Normalize device string (e.g. "cpu", "cuda", "mps") to a torch.device
         normalized_device = torch.device(device)
         self._device = device
-        # Weights must already be in the HF cache (see ai.download). Never hit the Hub here.
+        # Weights must already be in the HF cache (see download manager). Never hit the Hub here.
         self._pipe = pipeline(
             task="depth-estimation",
             model=MODEL_ID,

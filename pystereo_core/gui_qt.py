@@ -163,7 +163,7 @@ class PyStereoQtWindow(QMainWindow):
         srv_row = QHBoxLayout()
         self._srv_btn = QPushButton("Start server")
         self._srv_btn.setToolTip(
-            "Start a local HTTP server. Vaela can POST images to /transform "
+            "Start a local HTTP server. Clients can POST images to /transform "
             "and receive SBS stereo JPEGs."
         )
         self._srv_btn.clicked.connect(self._on_toggle_server)

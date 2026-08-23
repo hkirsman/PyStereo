@@ -1,4 +1,4 @@
-"""Allow ``python -m ai.stereo.cli``."""
+"""Allow ``python -m pystereo_core.stereo.cli``."""
 
 from pystereo_core.stereo.cli import main
 

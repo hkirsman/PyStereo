@@ -139,7 +139,7 @@ class AotGanInpaintBackend(InpaintBackend):
 
         logger.info("Loading AOT-GAN inpainting model on %s…", device)
 
-        # Weights must already be in the HF cache (see ai.download). Never hit the Hub here.
+        # Weights must already be in the HF cache (see download manager). Never hit the Hub here.
         weights_path = hf_hub_download(
             repo_id=self._HF_REPO,
             filename="pytorch_model.bin",

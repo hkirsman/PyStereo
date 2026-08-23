@@ -12,7 +12,7 @@ Pipeline: build foreground inpaint mask → detect depth edges → run
 Edge → Depth → Color networks to synthesise a background plate → warp
 the plate and the original image to left/right eyes → composite.
 
-Checkpoints are lazily loaded from ``VAELA_LDI_CHECKPOINT_DIR`` (default:
+Checkpoints are lazily loaded from ``PYSTEREO_LDI_CHECKPOINT_DIR`` (default:
 ``experiments/ldi_inpainting/repo/checkpoints/`` relative to the repo root).
 """
 
@@ -68,7 +68,7 @@ def _ensure_models() -> dict[str, Any]:
 
     from pystereo_core.stereo.ldi_nets import InpaintColorNet, InpaintDepthNet, InpaintEdgeNet
 
-    ckpt_dir = Path(os.environ.get("VAELA_LDI_CHECKPOINT_DIR", str(_DEFAULT_CKPT_DIR)))
+    ckpt_dir = Path(os.environ.get("PYSTEREO_LDI_CHECKPOINT_DIR", str(_DEFAULT_CKPT_DIR)))
     device = _get_device()
 
     edge_path = ckpt_dir / "edge-model.pth"
@@ -79,7 +79,7 @@ def _ensure_models() -> dict[str, Any]:
         if not p.exists():
             raise FileNotFoundError(
                 f"LDI checkpoint not found: {p}\n"
-                f"Download from the 3D-Photo-Inpainting repo or set VAELA_LDI_CHECKPOINT_DIR."
+                f"Download from the 3D-Photo-Inpainting repo or set PYSTEREO_LDI_CHECKPOINT_DIR."
             )
 
     logger.info("Loading LDI edge model from %s …", edge_path)

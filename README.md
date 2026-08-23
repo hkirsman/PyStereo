@@ -4,9 +4,8 @@ Standalone AI stereo synthesis - convert 2D photos into side-by-side (SBS)
 stereo pairs. Depth estimation, perspective warping, and inpainting run locally
 via PyTorch (CPU / MPS / CUDA). Weights download on first use.
 
-PyStereo was extracted from the [Vaela](https://github.com/hkirsman/Vaela)
-backend to keep each concern focused and make the stereo pipeline easier to
-improve independently.
+PyStereo is a standalone stereo synthesis service designed to be used on its own
+or integrated into any application that needs 2D-to-SBS conversion over HTTP.
 
 ## Setup (macOS / Linux)
 
@@ -49,7 +48,7 @@ Open **http://127.0.0.1:8766**
 ### Desktop GUI (`pystereo_core`)
 
 PySide6 window with batch processing, model management, and an embedded server
-toggle for Vaela integration:
+toggle for HTTP service integration:
 
 ```bash
 source .venv/bin/activate
@@ -63,16 +62,15 @@ source .venv/bin/activate
 python -m pystereo_core --cli --folder /path/to/photos --recursive
 ```
 
-### HTTP service (for Vaela)
+### HTTP service
 
-The web UI and the desktop GUI both expose the same HTTP endpoints that Vaela
-connects to:
+The web UI and the desktop GUI both expose HTTP endpoints for integration:
 
 - `GET /health` - returns `{"status": "ok", "kind": "stereo"}`
 - `POST /transform` - accepts a JPEG/PNG upload, returns an SBS JPEG
 
-In Vaela's dashboard, set **Stereo service URL** to `http://127.0.0.1:8766`
-and the backend will call PyStereo for AI stereo generation.
+Any application can point its stereo service URL to `http://127.0.0.1:8766`
+to use PyStereo for AI stereo generation.
 
 Headless equivalent: `python app.py --host 127.0.0.1 --port 8766`
 

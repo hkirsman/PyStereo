@@ -67,17 +67,17 @@ class StereoSettings:
 
         Method-specific defaults are applied first, then env vars override.
         """
-        method_raw = method or os.environ.get("VAELA_STEREO_METHOD", "").strip().lower()
+        method_raw = method or os.environ.get("PYSTEREO_METHOD", "").strip().lower()
         stereo_method: StereoMethodName = DEFAULT_METHOD
         if method_raw in ("per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill"):
             stereo_method = method_raw  # type: ignore[assignment]
 
-        backend_raw = os.environ.get("VAELA_STEREO_INPAINT", "lama").strip().lower()
+        backend_raw = os.environ.get("PYSTEREO_INPAINT", "lama").strip().lower()
         backend: InpaintBackendName = "lama"
         if backend_raw in ("lama", "opencv", "none", "flux", "aotgan"):
             backend = backend_raw  # type: ignore[assignment]
 
-        divergence_pct = os.environ.get("VAELA_STEREO_DIVERGENCE")
+        divergence_pct = os.environ.get("PYSTEREO_DIVERGENCE")
         divergence_ratio = 0.030
         if divergence_pct:
             try:
@@ -86,13 +86,13 @@ class StereoSettings:
             except ValueError:
                 pass
 
-        max_dim_raw = os.environ.get("VAELA_STEREO_MAX_DIM", "2048")
+        max_dim_raw = os.environ.get("PYSTEREO_MAX_DIM", "2048")
         try:
             max_processing_dim = max(512, int(max_dim_raw))
         except ValueError:
             max_processing_dim = 2048
 
-        heal_raw = os.environ.get("VAELA_STEREO_HEAL", "1").strip().lower()
+        heal_raw = os.environ.get("PYSTEREO_HEAL", "1").strip().lower()
         depth_healing = heal_raw not in ("0", "false", "no", "off")
 
         # Build with neutral defaults, then apply method-specific overrides,
@@ -109,21 +109,21 @@ class StereoSettings:
         # Env-var overrides (only applied when explicitly set)
         overrides: dict[str, Any] = {}
 
-        guided_eps_raw = os.environ.get("VAELA_STEREO_GUIDED_EPS")
+        guided_eps_raw = os.environ.get("PYSTEREO_GUIDED_EPS")
         if guided_eps_raw:
             try:
                 overrides["guided_filter_eps"] = max(1e-6, float(guided_eps_raw))
             except ValueError:
                 pass
 
-        depth_gamma_raw = os.environ.get("VAELA_STEREO_DEPTH_GAMMA")
+        depth_gamma_raw = os.environ.get("PYSTEREO_DEPTH_GAMMA")
         if depth_gamma_raw:
             try:
                 overrides["depth_gamma"] = max(0.1, float(depth_gamma_raw))
             except ValueError:
                 pass
 
-        narrow_px_raw = os.environ.get("VAELA_STEREO_NARROW_PX")
+        narrow_px_raw = os.environ.get("PYSTEREO_NARROW_PX")
         if narrow_px_raw:
             try:
                 overrides["narrow_strip_max_px"] = max(1, int(narrow_px_raw))

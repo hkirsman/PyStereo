@@ -158,7 +158,7 @@ def _fetch_remote_bytes(spec: ArtifactSpec) -> int:
             req = urllib.request.Request(
                 spec.url,
                 method="HEAD",
-                headers={"User-Agent": "Vaela/1.0"},
+                headers={"User-Agent": "PyStereo/1.0"},
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
                 length = resp.headers.get("Content-Length")
@@ -575,7 +575,7 @@ class ModelDownloadManager:
                 art.bytes_downloaded = 0
             self._thread = threading.Thread(
                 target=self._run_download,
-                name="vaela-ai-download",
+                name="pystereo-ai-download",
                 daemon=True,
             )
             self._thread.start()
@@ -820,7 +820,7 @@ class ModelDownloadManager:
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_suffix(dest.suffix + ".partial")
 
-        req = urllib.request.Request(spec.url, headers={"User-Agent": "Vaela/1.0"})
+        req = urllib.request.Request(spec.url, headers={"User-Agent": "PyStereo/1.0"})
         with urllib.request.urlopen(req, timeout=120) as resp:
             total = int(resp.headers.get("Content-Length") or 0)
             with self._lock:

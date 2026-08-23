@@ -41,7 +41,7 @@ class ForegroundSegmenter:
         self._device = torch.device(detect_device())
 
         logger.info("Loading BiRefNet on %s…", self._device)
-        # Weights must already be in the HF cache (see ai.download). Never hit the Hub here.
+        # Weights must already be in the HF cache (see download manager). Never hit the Hub here.
         self._model = AutoModelForImageSegmentation.from_pretrained(
             BIREFNET_MODEL_ID,
             trust_remote_code=True,
