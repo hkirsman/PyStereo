@@ -47,7 +47,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--inpaint",
-        choices=("lama", "opencv", "none", "flux"),
+        choices=("lama", "opencv", "none", "aotgan", "flux"),
         default="lama",
         help="Occlusion inpainting backend (default: lama)",
     )
