@@ -587,12 +587,9 @@ class ModelDownloadManager:
             art_id = spec.id
             if art_id not in self._artifacts:
                 self._artifacts[art_id] = _ArtifactRuntime()
-            self._pack_state = "downloading"
             self._error = None
             self._message = f"Downloading {spec.name}…"
             size = _FALLBACK_BYTES.get(art_id, 0)
-            self._job_bytes_done = 0
-            self._job_bytes_total = size
             self._file_reported = 0
             art = self._artifacts[art_id]
             art.state = "queued"
@@ -639,7 +636,6 @@ class ModelDownloadManager:
                         art.bytes_total = measured or art.bytes_total
                         art.bytes_downloaded = art.bytes_total
             with self._lock:
-                self._pack_state = "idle"
                 self._message = f"{spec.name} ready"
                 self._error = None
             self.refresh_local_state()
@@ -647,7 +643,6 @@ class ModelDownloadManager:
         except Exception as exc:
             logger.exception("Download of %s failed", spec.name)
             with self._lock:
-                self._pack_state = "idle"
                 self._error = str(exc)
                 self._message = f"Download failed: {exc}"
                 art = self._artifacts.get(spec.id)
