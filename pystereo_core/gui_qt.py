@@ -332,7 +332,7 @@ class PyStereoQtWindow(QMainWindow):
             self._model_progress.setVisible(True)
             self._model_progress.setValue(pct)
             self._model_download_btn.setEnabled(False)
-            self._model_cancel_btn.setVisible(True)
+            self._model_cancel_btn.setVisible(False)
             self._model_remove_btn.setEnabled(False)
             self._scan_btn.setEnabled(False)
         elif state == "error":
