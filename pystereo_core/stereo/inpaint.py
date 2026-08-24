@@ -115,8 +115,9 @@ class AotGanInpaintBackend(InpaintBackend):
     """AOT-GAN inpainting (Apache 2.0).
 
     Uses dilated convolutions (not FFCs) — no global receptive field, no
-    zero-initialization dark bias.  Weights auto-downloaded from
-    HuggingFace (``NimaBoscarino/aot-gan-places2``, ~58 MB).
+    zero-initialization dark bias.  Weights must already be present in the
+    local HuggingFace cache (downloaded by pystereo_core.download); this
+    backend never hits the Hub at runtime.
     """
 
     _HF_REPO = "NimaBoscarino/aot-gan-places2"
