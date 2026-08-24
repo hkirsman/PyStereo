@@ -2,7 +2,7 @@
 
 ## Depth estimation: trust the model, don't post-process
 
-**Decision:** Use Depth Anything V2 output as-is. Switch model size (Small/Base/Large) to get better quality rather than trying to fix depth maps after the fact.
+**Decision:** Use Depth Anything V2 geometry as the primary signal - don't try to invent depth detail via post-processing. Switch model size (Small/Base/Large) for better quality instead.
 
 **Context:** DA V2 Small produces flat foreground depth on some subjects (the "cardboard cutout" effect - a person pops out as a uniform slab). We tried amplifying internal depth variation using the BiRefNet foreground mask (stretch depth range around midpoint within masked region). The stretch had no visible effect because Small's foreground depth is genuinely flat - there's nothing to amplify. The guided filter then smoothed what little signal remained.
 
