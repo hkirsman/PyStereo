@@ -40,7 +40,7 @@ from pystereo_core.stereo.warp import dilate_occlusion_mask, hybrid_zbuf_remap_e
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CKPT_DIR = (
-    Path(__file__).resolve().parents[4]
+    Path(__file__).resolve().parents[3]
     / "experiments"
     / "ldi_inpainting"
     / "repo"
