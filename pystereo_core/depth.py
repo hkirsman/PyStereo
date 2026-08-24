@@ -4,8 +4,9 @@ Generates a grayscale depth map from a 2D photo using the HuggingFace
 ``transformers`` pipeline.  The model runs on MPS (Apple Silicon),
 CUDA, or CPU as fallback.
 
-Weights are downloaded automatically by HuggingFace on first use into
-the default ``~/.cache/huggingface/`` directory.
+Weights must already be present in the local HuggingFace cache
+(downloaded by pystereo_core.download); this module loads with
+``local_files_only=True``.
 """
 
 from __future__ import annotations
