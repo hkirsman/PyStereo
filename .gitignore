@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.nbc
+*.nbi
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+outputs/
+settings.json

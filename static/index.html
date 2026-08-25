@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PyStereo</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body class="model-gate-active">
+    <div id="modelBanner" class="model-banner" role="status" aria-live="polite" hidden>
+      <div class="model-banner-inner">
+        <div class="model-banner-copy">
+          <p id="modelBannerMessage" class="model-banner-message"></p>
+          <div id="modelBannerProgressWrap" class="model-banner-progress-wrap hidden">
+            <div class="model-banner-progress-track" aria-hidden="true">
+              <div id="modelBannerProgressBar" class="model-banner-progress-bar" style="width:0%"></div>
+            </div>
+            <span id="modelBannerProgressLabel" class="model-banner-progress-label"></span>
+          </div>
+        </div>
+        <div class="model-banner-actions">
+          <button type="button" class="btn btn-primary btn-banner" id="btnModelDownload" hidden>
+            Download
+          </button>
+          <button type="button" class="btn btn-secondary btn-banner" id="btnModelCancel" hidden title="Stop the download.">
+            Cancel
+          </button>
+          <button type="button" class="btn btn-secondary btn-banner" id="btnModelRemove" hidden>
+            Remove
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-shell" id="appShell">
+      <div id="modelGateOverlay" class="model-gate-overlay" aria-hidden="false">
+        <p class="model-gate-hint">Loading...</p>
+      </div>
+
+      <header class="page-header">
+        <h1 class="title">PyStereo</h1>
+        <p class="subtitle">Convert 2D photos to side-by-side stereo using AI depth estimation.</p>
+      </header>
+
+      <main class="layout">
+        <section class="panel panel-input" aria-label="Input">
+          <h2 class="panel-title">Input</h2>
+
+          <div class="drop-zone" id="dropZone">
+            <input type="file" id="fileInput" accept="image/*,.heic,.heif" hidden />
+            <div class="drop-zone-inner" id="dropInner">
+              <span class="drop-icon" aria-hidden="true">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                  <circle cx="12" cy="13" r="4" />
+                </svg>
+              </span>
+              <p class="drop-text">Drop an image here or click to browse.</p>
+              <img id="previewImg" class="preview-img hidden" alt="Selected input preview" />
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <span class="settings-label">Depth model</span>
+            <select id="depthModelSelect" class="settings-select" aria-label="Depth model">
+              <option value="small" selected>Small (~95 MB, Apache-2.0)</option>
+              <option value="base">Base (~400 MB, CC-BY-NC)</option>
+              <option value="large">Large (~1.3 GB, CC-BY-NC)</option>
+            </select>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnDownloadDepth" hidden>Download</button>
+          </div>
+
+          <div class="settings-row">
+            <span class="settings-label">Method</span>
+            <select id="methodSelect" class="settings-select" aria-label="Stereo method">
+              <option value="">Default</option>
+            </select>
+          </div>
+
+          <div class="settings-row">
+            <span class="settings-label">Max dim</span>
+            <div class="settings-slider-wrap">
+              <input type="range" id="maxDimSlider" class="settings-slider" min="512" max="4096" step="128" value="2048" />
+              <span id="maxDimValue" class="settings-value">2048</span>
+            </div>
+          </div>
+
+          <button type="button" class="btn btn-primary" id="btnGenerate" disabled>Generate</button>
+
+          <div class="status-wrap" id="statusWrap" aria-busy="false">
+            <div class="status-inner">
+              <span class="status-spinner" aria-hidden="true"></span>
+              <div class="status-bar" id="statusBar">Ready</div>
+            </div>
+          </div>
+
+          <p class="hint">Inference runs locally via Python (PyTorch). Download AI models above if prompted.</p>
+        </section>
+
+        <section class="panel panel-output" aria-label="Output">
+          <h2 class="panel-title">Output</h2>
+
+          <div id="pipelinePlaceholder" class="pipeline-placeholder">
+            <span class="spark" aria-hidden="true">&#10022;</span>
+            <p>Generate to preview</p>
+          </div>
+
+          <div id="pipelineStages" class="pipeline-stages hidden">
+            <div class="stage-card" id="stageOriginal" hidden>
+              <p class="stage-label">Original</p>
+              <img id="stageOriginalImg" class="stage-img" alt="Original input" />
+            </div>
+            <div class="stage-card" id="stageDepth" hidden>
+              <p class="stage-label">Depth Map (raw)</p>
+              <img id="stageDepthImg" class="stage-img" alt="Estimated depth map" />
+            </div>
+            <div class="stage-card" id="stageWarp" hidden>
+              <p class="stage-label">Warp (pre-inpaint)</p>
+              <img id="stageWarpImg" class="stage-img" alt="Warped stereo before inpainting" />
+            </div>
+            <div class="stage-card" id="stageSbs" hidden>
+              <p class="stage-label">SBS Stereo</p>
+              <img id="stageSbsImg" class="stage-img" alt="Side-by-side stereo result" />
+            </div>
+            <p class="stage-timing" id="stageTiming"></p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
