@@ -118,7 +118,18 @@ class ModelRegistry:
 
     def register(self, model: AIModel) -> None:
         """Register a model for its declared capability."""
-        self._models[model.capability] = model
+        with self._lock:
+            self._models[model.capability] = model
+        logger.info("Registered AI model: %s (capability=%s)", model.name, model.capability)
+
+    def replace(self, model: AIModel) -> None:
+        """Unload the current model for *model.capability* (if any) and register the new one."""
+        with self._lock:
+            old = self._models.get(model.capability)
+            if old is not None and old.is_loaded():
+                logger.info("Unloading model %s (replacing)", old.name)
+                old.unload()
+            self._models[model.capability] = model
         logger.info("Registered AI model: %s (capability=%s)", model.name, model.capability)
 
     def has_capability(self, capability: str) -> bool:

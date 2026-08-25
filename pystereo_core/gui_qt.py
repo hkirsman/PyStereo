@@ -436,14 +436,7 @@ class PyStereoQtWindow(QMainWindow):
 
         registry = get_registry()
         registry.detect_gpu()
-        if not registry.has_capability("depth"):
-            registry.register(DepthEstimator(model_size=depth_model_size))
-        else:
-            current = registry._models.get("depth")
-            if current and hasattr(current, "model_size") and current.model_size != depth_model_size:
-                if current.is_loaded():
-                    current.unload()
-                registry.register(DepthEstimator(model_size=depth_model_size))
+        registry.replace(DepthEstimator(model_size=depth_model_size))
         registry.enabled = True
 
         from dataclasses import replace as dc_replace
