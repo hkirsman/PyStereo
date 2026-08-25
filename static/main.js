@@ -410,14 +410,20 @@ btnGenerate.addEventListener("click", async () => {
 
   try {
     const res = await fetch("/api/generate", { method: "POST", body: form });
-    const data = await res.json();
 
     if (!res.ok) {
-      setStatus(data.error || "Generation failed", false, true);
+      let msg = `Generation failed (${res.status})`;
+      try {
+        const err = await res.json();
+        if (err.error) msg = err.error;
+      } catch {}
+      setStatus(msg, false, true);
       generating = false;
       updateGenerateBtn();
       return;
     }
+
+    const data = await res.json();
 
     // Show depth
     if (data.depth_url) {
