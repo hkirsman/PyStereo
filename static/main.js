@@ -162,6 +162,12 @@ btnModelDownload.addEventListener("click", async () => {
   btnModelDownload.disabled = true;
   try {
     const res = await fetch("/api/model/download", { method: "POST" });
+    if (!res.ok) {
+      let msg = `Server error (${res.status})`;
+      try { msg = (await res.json()).error || msg; } catch {}
+      applyModelStatus({ state: "error", error: msg });
+      return;
+    }
     const data = await res.json();
     applyModelStatus(data);
     schedulePoll(1500);
@@ -174,6 +180,12 @@ btnModelCancel.addEventListener("click", async () => {
   btnModelCancel.disabled = true;
   try {
     const res = await fetch("/api/model/cancel", { method: "POST" });
+    if (!res.ok) {
+      let msg = `Server error (${res.status})`;
+      try { msg = (await res.json()).error || msg; } catch {}
+      applyModelStatus({ state: "error", error: msg });
+      return;
+    }
     const data = await res.json();
     applyModelStatus(data);
   } catch {
@@ -186,6 +198,12 @@ btnModelRemove.addEventListener("click", async () => {
   btnModelRemove.disabled = true;
   try {
     const res = await fetch("/api/model/delete", { method: "POST" });
+    if (!res.ok) {
+      let msg = `Server error (${res.status})`;
+      try { msg = (await res.json()).error || msg; } catch {}
+      applyModelStatus({ state: "error", error: msg });
+      return;
+    }
     const data = await res.json();
     applyModelStatus(data);
   } catch {
