@@ -51,7 +51,9 @@ class DepthEstimator(AIModel):
     capability = "depth"
 
     def __init__(self, model_size: str = "small") -> None:
-        info = DEPTH_MODELS.get(model_size, DEPTH_MODELS["small"])
+        if model_size not in DEPTH_MODELS:
+            model_size = "small"
+        info = DEPTH_MODELS[model_size]
         self._model_size = model_size
         self._model_id: str = info["repo_id"]
         self.name = info["name"]
