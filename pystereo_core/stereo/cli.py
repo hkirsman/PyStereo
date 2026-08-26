@@ -58,6 +58,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Longest side for warp/inpaint processing (default: 2048)",
     )
     parser.add_argument(
+        "--method",
+        type=str,
+        default=None,
+        help="Stereo method (default: per_eye_inpaint). SHARP methods: sharp_splat, sharp_detail, sharp_depth, sharp_mesh, sharp_taichi.",
+    )
+    parser.add_argument(
         "--no-heal",
         action="store_true",
         default=False,
@@ -91,6 +97,14 @@ def _run_synthesis(
     rgb: Image.Image,
     args: argparse.Namespace,
 ) -> Image.Image:
+    method = getattr(args, "method", None)
+
+    if method:
+        from pystereo_core.stereo.methods import get_method
+        stereo_method = get_method(method)
+        if not stereo_method.needs_depth:
+            return pipeline._synthesize_no_depth(rgb, stereo_method, method)
+
     if args.depth is not None:
         depth_path = args.depth.expanduser().resolve()
         if not depth_path.is_file():
@@ -98,16 +112,16 @@ def _run_synthesis(
         with Image.open(depth_path) as dimg:
             depth = dimg.convert("L")
         logger.info("Using depth map %s", depth_path)
-        return pipeline.synthesize(rgb, depth)
+        return pipeline.synthesize(rgb, depth, method=method)
 
     from pystereo_core.depth import DepthEstimator
 
     device = _resolve_device(args.device)
     estimator = DepthEstimator()
-    logger.info("Loading depth model on %s…", device)
+    logger.info("Loading depth model on %s...", device)
     estimator.load(device)
     try:
-        return pipeline.synthesize_with_depth_estimator(rgb, estimator)
+        return pipeline.synthesize_with_depth_estimator(rgb, estimator, method=method)
     finally:
         estimator.unload()
 

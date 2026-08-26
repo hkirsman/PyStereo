@@ -49,6 +49,7 @@ let modelReady = false;
 let generating = false;
 let pollTimer = null;
 let depthModelStatus = {};
+let methodMeta = {};
 
 // -- Formatting helpers -----------------------------------------------------
 
@@ -93,7 +94,9 @@ function applyModelStatus(data) {
     btnModelCancel.hidden = false;
     btnModelCancel.disabled = false;
     btnModelRemove.hidden = true;
-    lockGate("Download in progress - workspace unlocks when it finishes.");
+    if (selectedMethodNeedsDepth()) {
+      lockGate("Download in progress - workspace unlocks when it finishes.");
+    }
   } else if (state === "error") {
     modelBanner.classList.add("is-error");
     modelBannerMsg.textContent = data.error
@@ -105,7 +108,9 @@ function applyModelStatus(data) {
     btnModelDownload.disabled = false;
     btnModelCancel.hidden = true;
     btnModelRemove.hidden = true;
-    lockGate("Download failed. Use Retry in the banner above.");
+    if (selectedMethodNeedsDepth()) {
+      lockGate("Download failed. Use Retry in the banner above.");
+    }
   } else {
     modelBannerMsg.textContent =
       "Download the AI stereo models to generate side-by-side images.";
@@ -115,7 +120,9 @@ function applyModelStatus(data) {
     btnModelDownload.disabled = false;
     btnModelCancel.hidden = true;
     btnModelRemove.hidden = true;
-    lockGate("Download AI models using the banner above to get started.");
+    if (selectedMethodNeedsDepth()) {
+      lockGate("Download AI models using the banner above to get started.");
+    }
   }
 
   updateGenerateBtn();
@@ -361,8 +368,20 @@ depthModelSelect.addEventListener("change", () => {
 });
 
 methodSelect.addEventListener("change", () => {
+  updateGenerateBtn();
+  if (!selectedMethodNeedsDepth()) {
+    unlockGate();
+  } else if (!modelReady) {
+    lockGate("Download AI models using the banner above to get started.");
+  }
   saveSettings();
 });
+
+function selectedMethodNeedsDepth() {
+  const method = methodSelect.value;
+  if (!method || !(method in methodMeta)) return true;
+  return methodMeta[method].needs_depth;
+}
 
 async function loadMethods() {
   try {
@@ -370,9 +389,10 @@ async function loadMethods() {
     if (!res.ok) return;
     const methods = await res.json();
     for (const m of methods) {
+      methodMeta[m.name] = m;
       const opt = document.createElement("option");
-      opt.value = m;
-      opt.textContent = m.replace(/_/g, " ");
+      opt.value = m.name;
+      opt.textContent = m.name.replace(/_/g, " ");
       methodSelect.appendChild(opt);
     }
   } catch {
@@ -383,7 +403,8 @@ async function loadMethods() {
 // -- Generate ---------------------------------------------------------------
 
 function updateGenerateBtn() {
-  btnGenerate.disabled = !selectedFile || !modelReady || generating;
+  const needsModel = selectedMethodNeedsDepth();
+  btnGenerate.disabled = !selectedFile || (needsModel && !modelReady) || generating;
 }
 
 function setStatus(text, busy, isError) {
@@ -394,10 +415,11 @@ function setStatus(text, busy, isError) {
 }
 
 btnGenerate.addEventListener("click", async () => {
-  if (!selectedFile || !modelReady || generating) return;
+  const needsModel = selectedMethodNeedsDepth();
+  if (!selectedFile || (needsModel && !modelReady) || generating) return;
 
   const depthModel = depthModelSelect.value;
-  if (depthModelStatus[depthModel] === false) {
+  if (needsModel && depthModelStatus[depthModel] === false) {
     setStatus("Depth model not downloaded. Click Download first.", false, true);
     return;
   }
@@ -417,7 +439,7 @@ btnGenerate.addEventListener("click", async () => {
   stageSbs.hidden = true;
   stageTiming.textContent = "";
 
-  setStatus("Running depth estimation + stereo synthesis...", true, false);
+  setStatus(needsModel ? "Running depth estimation + stereo synthesis..." : "Running SHARP stereo synthesis...", true, false);
 
   const form = new FormData();
   form.append("file", selectedFile);

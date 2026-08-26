@@ -26,6 +26,10 @@ LAMA_MODEL_URL = (
     "https://github.com/enesmsahin/simple-lama-inpainting/releases/"
     "download/v0.1.0/big-lama.pt"
 )
+SHARP_MODEL_URL = (
+    "https://ml-site.cdn-apple.com/models/sharp/sharp_2572gikvuh.pt"
+)
+SHARP_CKPT_FILENAME = "sharp_2572gikvuh.pt"
 
 # Last-resort size when neither local cache nor remote metadata is available.
 _FALLBACK_BYTES: Dict[str, int] = {
@@ -35,6 +39,7 @@ _FALLBACK_BYTES: Dict[str, int] = {
     "segment": 424 * 1024 * 1024,
     "inpaint": 196 * 1024 * 1024,
     "aotgan": 58 * 1024 * 1024,
+    "sharp": 2800 * 1024 * 1024,
 }
 
 DEPTH_MODEL_SPECS: Dict[str, "ArtifactSpec"] = {}  # populated after ArtifactSpec
@@ -83,6 +88,19 @@ DEPTH_MODEL_SPECS.update({
     "base": ArtifactSpec(id="depth_base", name="Depth Anything V2 Base", kind="hf", repo_id=DEPTH_BASE_REPO_ID),
     "large": ArtifactSpec(id="depth_large", name="Depth Anything V2 Large", kind="hf", repo_id=DEPTH_LARGE_REPO_ID),
 })
+
+SHARP_SPEC = ArtifactSpec(
+    id="sharp",
+    name="Apple SHARP (research-only)",
+    kind="url",
+    url=SHARP_MODEL_URL,
+)
+
+
+def _sharp_cache_path() -> Path:
+    from torch.hub import get_dir
+
+    return Path(get_dir()) / "checkpoints" / SHARP_CKPT_FILENAME
 
 
 def _lama_cache_path(url: str) -> Path:
@@ -239,8 +257,11 @@ def _hf_repo_cache_dir(repo_id: str) -> Path | None:
     return None
 
 
-def _safe_lama_cache_file(url: str) -> Path | None:
-    """Return the default LaMa checkpoint path only if it matches the allowlist."""
+_ALLOWED_URL_CHECKPOINTS = {"big-lama.pt", SHARP_CKPT_FILENAME}
+
+
+def _safe_url_cache_file(url: str) -> Path | None:
+    """Return the torch-hub checkpoint path for *url* if its filename is allowlisted."""
     if not url:
         return None
     from urllib.parse import urlparse
@@ -248,14 +269,13 @@ def _safe_lama_cache_file(url: str) -> Path | None:
     from torch.hub import get_dir
 
     filename = os.path.basename(urlparse(url).path)
-    # Only ever delete the known release artifact name — never an empty/odd basename.
-    if filename != "big-lama.pt":
-        logger.warning("Refusing LaMa delete: unexpected filename %r", filename)
+    if filename not in _ALLOWED_URL_CHECKPOINTS:
+        logger.warning("Refusing delete: unexpected checkpoint filename %r", filename)
         return None
     checkpoints = (Path(get_dir()).expanduser().resolve() / "checkpoints")
     path = (checkpoints / filename).resolve()
     if path.parent != checkpoints or path.name != filename:
-        logger.warning("Refusing LaMa delete: path escaped checkpoints dir (%s)", path)
+        logger.warning("Refusing delete: path escaped checkpoints dir (%s)", path)
         return None
     return path
 
@@ -266,9 +286,9 @@ def _artifact_deletable_path(spec: ArtifactSpec) -> Path | None:
         root = _hf_repo_cache_dir(spec.repo_id)
         return root if root is not None and root.is_dir() else None
     if spec.kind == "url" and spec.url:
-        if os.environ.get("LAMA_MODEL"):
+        if spec.id != "sharp" and os.environ.get("LAMA_MODEL"):
             return None
-        path = _safe_lama_cache_file(spec.url)
+        path = _safe_url_cache_file(spec.url)
         return path if path is not None and path.is_file() else None
     return None
 
@@ -606,8 +626,59 @@ class ModelDownloadManager:
             self._thread.start()
         return True
 
+    def is_sharp_model_local(self) -> bool:
+        """Check if the SHARP checkpoint is cached locally."""
+        return _artifact_is_local(SHARP_SPEC)
+
+    def ensure_sharp_model_async(self) -> bool:
+        """Start downloading the SHARP checkpoint in the background.
+
+        Returns True if a download was started (or the model is already local).
+        """
+        if _artifact_is_local(SHARP_SPEC):
+            return True
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return True
+            art_id = SHARP_SPEC.id
+            if art_id not in self._artifacts:
+                self._artifacts[art_id] = _ArtifactRuntime()
+            self._error = None
+            self._message = f"Downloading {SHARP_SPEC.name}..."
+            size = _FALLBACK_BYTES.get(art_id, 0)
+            self._file_reported = 0
+            art = self._artifacts[art_id]
+            art.state = "queued"
+            art.percent = 0
+            art.error = None
+            art.bytes_total = size
+            art.bytes_downloaded = 0
+            self._thread = threading.Thread(
+                target=self._run_single_download,
+                args=(SHARP_SPEC,),
+                name="pystereo-dl-sharp",
+                daemon=True,
+            )
+            self._thread.start()
+        return True
+
+    def delete_sharp_model(self) -> dict[str, Any]:
+        """Remove the SHARP checkpoint from disk."""
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                raise RuntimeError("Cannot delete while a download is in progress")
+        bytes_removed, path = _delete_artifact(SHARP_SPEC)
+        with self._lock:
+            art = self._artifacts.get(SHARP_SPEC.id)
+            if art:
+                art.state = "absent"
+                art.percent = 0
+                art.bytes_downloaded = 0
+                art.error = None
+        return {"deleted_bytes": bytes_removed, "path": path}
+
     def _run_single_download(self, spec: ArtifactSpec) -> None:
-        """Download a single artifact (used for optional depth models)."""
+        """Download a single artifact (used for optional models)."""
         try:
             if _artifact_is_local(spec):
                 with self._lock:
@@ -617,7 +688,7 @@ class ModelDownloadManager:
                         art.percent = 100
             else:
                 with self._lock:
-                    self._message = f"Downloading {spec.name}…"
+                    self._message = f"Downloading {spec.name}..."
                     art = self._artifacts.get(spec.id)
                     if art:
                         art.state = "downloading"
@@ -625,6 +696,8 @@ class ModelDownloadManager:
                     self._file_reported = 0
                 if spec.kind == "hf" and spec.repo_id:
                     self._download_hf(spec)
+                elif spec.kind == "url" and spec.url:
+                    self._download_url(spec)
                 measured = _measure_local_bytes(spec)
                 with self._lock:
                     if measured > 0:

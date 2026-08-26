@@ -22,6 +22,13 @@ def _populate() -> None:
     from pystereo_core.stereo.methods.ldi_inpaint import LdiInpaintMethod
     from pystereo_core.stereo.methods.iterative_fill import IterativeFillMethod
     from pystereo_core.stereo.methods.fullres_warp import FullResWarpMethod
+    from pystereo_core.stereo.methods.sharp_splat import (
+        SharpDepthMethod,
+        SharpDetailMethod,
+        SharpMeshMethod,
+        SharpSplatMethod,
+        SharpTaichiMethod,
+    )
 
     _REGISTRY["per_eye_inpaint"] = PerEyeInpaintMethod
     _REGISTRY["fullres_warp"] = FullResWarpMethod
@@ -32,6 +39,11 @@ def _populate() -> None:
     _REGISTRY["combo_fill"] = ComboFillMethod
     _REGISTRY["ldi_inpaint"] = LdiInpaintMethod
     _REGISTRY["iterative_fill"] = IterativeFillMethod
+    _REGISTRY["sharp_splat"] = SharpSplatMethod
+    _REGISTRY["sharp_detail"] = SharpDetailMethod
+    _REGISTRY["sharp_depth"] = SharpDepthMethod
+    _REGISTRY["sharp_mesh"] = SharpMeshMethod
+    _REGISTRY["sharp_taichi"] = SharpTaichiMethod
 
 
 def get_method(name: str) -> BaseStereoMethod:

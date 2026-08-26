@@ -184,8 +184,9 @@ def _get_pipeline() -> Any:
             from pystereo_core.stereo.config import StereoSettings
             from pystereo_core.stereo.pipeline import StereoPipeline
 
-            settings = StereoSettings.from_env()
             saved = _load_user_settings()
+            saved_method = (saved.get("method") or "").strip().lower() or None
+            settings = StereoSettings.from_env(method=saved_method)
             overrides: dict[str, Any] = {}
             if "max_dim" in saved:
                 try:
@@ -439,15 +440,24 @@ def api_settings_put() -> Any:
             from dataclasses import replace as dc_replace
 
             overrides: dict[str, Any] = {}
+            if "method" in saved:
+                method_raw = (str(saved["method"]) or "").strip().lower()
+                from pystereo_core.stereo.config import StereoMethodName
+                valid_methods = StereoMethodName.__args__  # type: ignore[attr-defined]
+                if method_raw in valid_methods:
+                    overrides["stereo_method"] = method_raw
             if "max_dim" in saved:
                 try:
                     overrides["max_processing_dim"] = max(512, int(saved["max_dim"]))
                 except (ValueError, TypeError):
                     pass
             if overrides:
-                _pipeline_singleton.settings = dc_replace(
+                new_settings = dc_replace(
                     _pipeline_singleton.settings, **overrides,
                 )
+                if "stereo_method" in overrides:
+                    new_settings = new_settings.with_method_defaults()
+                _pipeline_singleton.settings = new_settings
 
     if "depth_model" in saved:
         _ensure_registry(model_size=str(saved["depth_model"]))
@@ -464,8 +474,10 @@ def api_settings_put() -> Any:
 def api_stereo_methods() -> Any:
     from pystereo_core.stereo.methods import available_methods
 
-    methods = sorted(available_methods().keys())
-    return jsonify(methods)
+    result = []
+    for name, cls in sorted(available_methods().items()):
+        result.append({"name": name, "needs_depth": cls.needs_depth})
+    return jsonify(result)
 
 
 # ---------------------------------------------------------------------------
@@ -483,16 +495,25 @@ def transform() -> Any:
         return jsonify({"error": "Empty filename"}), 400
 
     name = Path(upload.filename).name
-    blocked = _require_model_ready()
-    if blocked is not None:
-        gui_log("  Failed - stereo model not ready (download required)")
-        return blocked
 
     method_override = (request.form.get("method") or "").strip().lower() or None
     max_dim_raw = (request.form.get("max_dim") or "").strip()
     depth_model = (request.form.get("depth_model") or "small").strip().lower()
 
-    _ensure_registry(model_size=depth_model)
+    effective_method = method_override or _get_pipeline().settings.stereo_method
+    method_needs_depth = True
+    try:
+        from pystereo_core.stereo.methods import get_method
+        method_needs_depth = get_method(effective_method).needs_depth
+    except ValueError:
+        pass
+
+    if method_needs_depth:
+        blocked = _require_model_ready()
+        if blocked is not None:
+            gui_log("  Failed - stereo model not ready (download required)")
+            return blocked
+        _ensure_registry(model_size=depth_model)
     gui_log(f"Generating stereo SBS for {name}...")
 
     t0 = time.perf_counter()
@@ -503,7 +524,7 @@ def transform() -> Any:
             gui_log(f"  Running depth + stereo ({w}x{h})...")
 
             depth_estimator = _get_depth_estimator()
-            if depth_estimator is None:
+            if depth_estimator is None and method_needs_depth:
                 gui_log("  Failed - depth model not loaded")
                 return jsonify({"error": "Depth model not loaded"}), 503
 
@@ -566,13 +587,24 @@ def api_generate() -> Any:
     if not upload.filename:
         return jsonify({"error": "Empty filename"}), 400
 
-    blocked = _require_model_ready()
-    if blocked is not None:
-        return blocked
-
     method_override = (request.form.get("method") or "").strip().lower() or None
     max_dim_raw = (request.form.get("max_dim") or "").strip()
     depth_model = (request.form.get("depth_model") or "small").strip().lower()
+
+    gen_needs_depth = True
+    if method_override:
+        try:
+            from pystereo_core.stereo.methods import get_method as _get_stereo_method
+            gen_needs_depth = _get_stereo_method(method_override).needs_depth
+        except ValueError:
+            pass
+
+    if gen_needs_depth:
+        blocked = _require_model_ready()
+        if blocked is not None:
+            return blocked
+        _ensure_registry(model_size=depth_model)
+
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     result_id = str(uuid.uuid4())
     result_dir = OUTPUTS_DIR / result_id
@@ -582,33 +614,11 @@ def api_generate() -> Any:
     input_path = result_dir / f"input{ext}"
     upload.save(str(input_path))
 
-    _ensure_registry(model_size=depth_model)
-
     t0 = time.perf_counter()
     try:
         with PREDICT_LOCK:
             rgb_pil = Image.open(input_path).convert("RGB")
             w, h = rgb_pil.size
-
-            depth_estimator = _get_depth_estimator()
-            if depth_estimator is None:
-                shutil.rmtree(result_dir, ignore_errors=True)
-                return jsonify({"error": "Depth model not loaded"}), 503
-
-            # Generate depth map
-            import numpy as np
-
-            if hasattr(depth_estimator, "process_raw"):
-                depth_f32 = depth_estimator.process_raw(rgb_pil)
-                depth_u8 = (depth_f32 * 255).clip(0, 255).astype(np.uint8)
-                depth_pil = Image.fromarray(depth_u8, mode="L")
-            else:
-                depth_pil = depth_estimator.process(rgb_pil)
-                depth_f32 = np.array(
-                    depth_pil.convert("L"), dtype=np.float32,
-                ) / 255.0
-
-            depth_pil.save(str(result_dir / "depth.png"))
 
             # Resolve pipeline with per-request overrides
             pipeline = _get_pipeline()
@@ -627,20 +637,46 @@ def api_generate() -> Any:
             else:
                 active_pipeline = pipeline
 
-            # Warp preview (pre-inpaint intermediates)
-            warp_result = active_pipeline.warp_preview(
-                rgb_pil, depth_f32, method=method_override,
-            )
-            if warp_result is not None:
-                warp_result.warp_sbs.save(
-                    str(result_dir / "warp.jpg"), quality=95,
+            warp_result = None
+            if not gen_needs_depth:
+                sbs_img = active_pipeline.synthesize_with_depth_estimator(
+                    rgb_pil, None, method=method_override,
                 )
-                warp_result.mask_sbs.save(str(result_dir / "mask.png"))
+            else:
+                depth_estimator = _get_depth_estimator()
+                if depth_estimator is None:
+                    shutil.rmtree(result_dir, ignore_errors=True)
+                    return jsonify({"error": "Depth model not loaded"}), 503
 
-            # Generate SBS
-            sbs_img = active_pipeline.synthesize(
-                rgb_pil, depth_f32, method=method_override,
-            )
+                # Generate depth map
+                import numpy as np
+
+                if hasattr(depth_estimator, "process_raw"):
+                    depth_f32 = depth_estimator.process_raw(rgb_pil)
+                    depth_u8 = (depth_f32 * 255).clip(0, 255).astype(np.uint8)
+                    depth_pil = Image.fromarray(depth_u8, mode="L")
+                else:
+                    depth_pil = depth_estimator.process(rgb_pil)
+                    depth_f32 = np.array(
+                        depth_pil.convert("L"), dtype=np.float32,
+                    ) / 255.0
+
+                depth_pil.save(str(result_dir / "depth.png"))
+
+                # Warp preview (pre-inpaint intermediates)
+                warp_result = active_pipeline.warp_preview(
+                    rgb_pil, depth_f32, method=method_override,
+                )
+                if warp_result is not None:
+                    warp_result.warp_sbs.save(
+                        str(result_dir / "warp.jpg"), quality=95,
+                    )
+                    warp_result.mask_sbs.save(str(result_dir / "mask.png"))
+
+                # Generate SBS
+                sbs_img = active_pipeline.synthesize(
+                    rgb_pil, depth_f32, method=method_override,
+                )
             sbs_img.save(str(result_dir / "sbs.jpg"), quality=95)
 
     except Exception:
@@ -664,16 +700,17 @@ def api_generate() -> Any:
     resp: dict[str, Any] = {
         "id": result_id,
         "sbs_url": f"/api/results/{result_id}/sbs.jpg",
-        "depth_url": f"/api/results/{result_id}/depth.png",
         "input_url": f"/api/results/{result_id}/input{ext}",
         "method": meta["method"],
         "width": w,
         "height": h,
         "elapsed_seconds": elapsed,
     }
-    if warp_result is not None:
-        resp["warp_url"] = f"/api/results/{result_id}/warp.jpg"
-        resp["mask_url"] = f"/api/results/{result_id}/mask.png"
+    if gen_needs_depth:
+        resp["depth_url"] = f"/api/results/{result_id}/depth.png"
+        if warp_result is not None:
+            resp["warp_url"] = f"/api/results/{result_id}/warp.jpg"
+            resp["mask_url"] = f"/api/results/{result_id}/mask.png"
     return jsonify(resp)
 
 

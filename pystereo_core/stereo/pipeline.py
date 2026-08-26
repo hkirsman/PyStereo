@@ -190,6 +190,32 @@ class StereoPipeline:
         except Exception:
             pass
 
+    def _synthesize_no_depth(
+        self,
+        image: Image.Image,
+        stereo_method: BaseStereoMethod,
+        method_name: str,
+    ) -> Image.Image:
+        """Bypass depth preprocessing for methods that predict their own 3D."""
+        rgb = image.convert("RGB")
+        fg_mask: np.ndarray | None = None
+        try:
+            segmenter = self._ensure_segmenter()
+            fg_mask = segmenter.segment(
+                rgb, padding=self.settings.segmenter_padding
+            )
+        except Exception as exc:
+            logger.warning(
+                "Segmenter unavailable (%s); SHARP convergence will use "
+                "depth percentile fallback",
+                exc,
+            )
+
+        logger.info("Stereo [%s]: needs_depth=False, skipping depth pipeline", method_name)
+        left, right = stereo_method.synthesize(rgb, fg_mask, self.settings)
+        self._release_gpu_cache()
+        return Image.fromarray(_compose_sbs(left, right))
+
     def synthesize(
         self,
         image: Image.Image,
@@ -212,6 +238,12 @@ class StereoPipeline:
         method:
             Override the stereo method for this call (ignores settings).
         """
+        method_name = method or self.settings.stereo_method
+        stereo_method = self._get_method(method_name)
+
+        if not stereo_method.needs_depth:
+            return self._synthesize_no_depth(image, stereo_method, method_name)
+
         p = self._preprocess(
             image, depth_map,
             divergence_ratio=divergence_ratio, method=method,
@@ -256,6 +288,12 @@ class StereoPipeline:
         method: StereoMethodName | None = None,
     ) -> Image.Image:
         """Run depth estimation then synthesize SBS."""
+        method_name = method or self.settings.stereo_method
+        stereo_method = self._get_method(method_name)
+
+        if not stereo_method.needs_depth:
+            return self._synthesize_no_depth(image, stereo_method, method_name)
+
         if hasattr(depth_estimator, "process_raw"):
             depth_f32 = depth_estimator.process_raw(image.convert("RGB"))
             return self.synthesize(image, depth_f32, method=method)

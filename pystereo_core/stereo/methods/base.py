@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
 import numpy as np
+from PIL import Image
 
 from pystereo_core.stereo.config import StereoSettings
 from pystereo_core.stereo.inpaint import InpaintBackend
@@ -18,6 +19,9 @@ class BaseStereoMethod(ABC):
     Shared preprocessing (resize, depth healing, guided filter, gamma)
     is handled by :class:`~pystereo_core.stereo.pipeline.StereoPipeline` before
     calling :meth:`warp_and_fill`.
+
+    Methods that set ``needs_depth = False`` bypass all depth-based
+    preprocessing and use :meth:`synthesize` instead of :meth:`warp_and_fill`.
     """
 
     name: ClassVar[str]
@@ -25,6 +29,7 @@ class BaseStereoMethod(ABC):
     description: ClassVar[str]
 
     wants_full_res: ClassVar[bool] = False
+    needs_depth: ClassVar[bool] = True
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {}
 
@@ -64,6 +69,38 @@ class BaseStereoMethod(ABC):
         right:
             ``(H, W, 3)`` uint8 RGB — right eye view, holes filled.
         """
+
+    def synthesize(
+        self,
+        image: Image.Image,
+        fg_mask: np.ndarray | None,
+        settings: StereoSettings,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Produce stereo eyes without external depth estimation.
+
+        Called instead of :meth:`warp_and_fill` when ``needs_depth`` is
+        ``False``.  The method handles its own 3D prediction and rendering.
+
+        Parameters
+        ----------
+        image:
+            Source RGB photo (original resolution, PIL).
+        fg_mask:
+            ``(H, W)`` float32 in ``[0, 1]`` from BiRefNet, or ``None``.
+        settings:
+            Current stereo settings.
+
+        Returns
+        -------
+        left:
+            ``(H, W, 3)`` uint8 RGB.
+        right:
+            ``(H, W, 3)`` uint8 RGB.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} sets needs_depth=False but does not "
+            "implement synthesize()"
+        )
 
     def warp_preview(
         self,

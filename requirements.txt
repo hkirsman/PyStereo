@@ -24,5 +24,10 @@ simple-lama-inpainting
 # HuggingFace Hub (via transformers, but pin for download manager)
 huggingface_hub
 
+# SHARP splat stereo (Apple ML Research license, research-only)
+# ml-sharp is a git submodule: pip install -e ./ml-sharp --no-deps
+scipy
+pillow-heif
+
 # Optional: Qt desktop GUI
 # PySide6-Essentials
