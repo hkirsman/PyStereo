@@ -111,4 +111,5 @@ Distribute either bundle by zipping the whole output folder, including
 
 Multiple stereo methods are available (bg_plate_fill, clean_fill, combo_fill,
 direct_fill, fullres_warp, iterative_fill, ldi_inpaint, per_eye_inpaint,
-routed_fill) - configurable via the web UI or `?method=name` query parameter.
+routed_fill) - configurable via the web UI, a `method` form field, or a
+`?method=name` query parameter.

@@ -27,7 +27,11 @@ from pystereo_core.stereo.methods.bg_plate_fill import (
     _match_inpaint_color,
     _sharpen_inpainted_region,
 )
-from pystereo_core.stereo.warp import dilate_occlusion_mask, hybrid_zbuf_remap_eye
+from pystereo_core.stereo.warp import (
+    EyeSide,
+    dilate_hole_mask,
+    hybrid_zbuf_remap_eye,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,13 +82,17 @@ class FullResWarpMethod(BaseStereoMethod):
     name: ClassVar[str] = "fullres_warp"
     label: ClassVar[str] = "Per-Eye Inpaint (Full-Res)"
     description: ClassVar[str] = (
-        "Same warp strategy as Per-Eye Inpaint but at full source "
-        "resolution. Downscales only for inpainting, then composites "
-        "fills back via a feathered occlusion mask. Preserves maximum "
-        "sharpness for the ~97% of pixels that are directly warped."
+        "Hybrid z-buffer warp at full source resolution with "
+        "background-plate fills. Downscales only for inpainting, then "
+        "composites fills back via a feathered occlusion mask. Preserves "
+        "maximum sharpness for the ~97% of pixels that are directly warped."
     )
 
     wants_full_res: ClassVar[bool] = True
+
+    #: Eye delivered as the untouched source.  ``None`` splits the
+    #: disparity evenly between both eyes.
+    anchor_eye: ClassVar[EyeSide | None] = None
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {
         "guided_filter_eps": 5e-3,
@@ -92,6 +100,67 @@ class FullResWarpMethod(BaseStereoMethod):
         "depth_healing_edge_blur_sigma": 4.0,
         "depth_healing_mask_dilate_px": 8,
     }
+
+    def _warp_pair(
+        self,
+        image: np.ndarray,
+        depth_f32: np.ndarray,
+        max_disp: float,
+        crack_fill_px: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Warp both eyes.  Returns ``(left, left_mask, right, right_mask)``.
+
+        Without an :attr:`anchor_eye` the disparity is split evenly, so both
+        eyes are warped by half and both carry fill artefacts.  With one set,
+        that eye is passed through untouched and the other takes the whole
+        disparity — same total parallax, but one eye is real photographed
+        pixels with nothing invented in it.
+        """
+        anchor = self.anchor_eye
+        if anchor is None:
+            left, left_mask = hybrid_zbuf_remap_eye(
+                image, depth_f32, max_disp, "left", crack_fill_px=crack_fill_px,
+            )
+            right, right_mask = hybrid_zbuf_remap_eye(
+                image, depth_f32, max_disp, "right", crack_fill_px=crack_fill_px,
+            )
+            return left, left_mask, right, right_mask
+
+        other: EyeSide = "right" if anchor == "left" else "left"
+        warped, mask = hybrid_zbuf_remap_eye(
+            image, depth_f32, max_disp * 2.0, other, crack_fill_px=crack_fill_px,
+        )
+        clean = image.copy()
+        no_holes = np.zeros(image.shape[:2], dtype=np.uint8)
+        if anchor == "left":
+            return clean, no_holes, warped, mask
+        return warped, mask, clean, no_holes
+
+    def inpaint_preview(
+        self,
+        rgb_arr: np.ndarray,
+        depth_f32: np.ndarray,
+        max_disp: float,
+        fg_mask: np.ndarray | None,
+        settings: StereoSettings,
+        inpainter: InpaintBackend,
+    ) -> np.ndarray | None:
+        full_mask = BgPlateFillMethod._build_bg_inpaint_mask(
+            depth_f32, fg_mask, max_disp,
+            dilate_cap_px=settings.bg_plate_dilate_max_px,
+        )
+        if full_mask is None:
+            return None
+        tight = settings.bg_plate_tight_dilate_px
+        lama_mask = full_mask
+        if tight > 0:
+            tight_mask = BgPlateFillMethod._build_bg_inpaint_mask(
+                depth_f32, fg_mask, max_disp, dilate_r_override=tight,
+            )
+            if tight_mask is not None:
+                lama_mask = tight_mask
+        plate = inpainter.inpaint(rgb_arr, lama_mask)
+        return _match_inpaint_color(rgb_arr, plate, lama_mask)
 
     def warp_and_fill(
         self,
@@ -106,12 +175,19 @@ class FullResWarpMethod(BaseStereoMethod):
         max_dim = settings.max_processing_dim
 
         # --- Full-res warp for both eyes ---
-        left, left_mask = hybrid_zbuf_remap_eye(rgb_arr, depth_f32, max_disp, "left")
-        right, right_mask = hybrid_zbuf_remap_eye(rgb_arr, depth_f32, max_disp, "right")
+        crack = settings.warp_crack_fill_px
+        left, left_mask, right, right_mask = self._warp_pair(
+            rgb_arr, depth_f32, max_disp, crack,
+        )
 
         if settings.inpaint_mask_dilate_px > 0:
-            left_mask = dilate_occlusion_mask(left_mask, settings.inpaint_mask_dilate_px)
-            right_mask = dilate_occlusion_mask(right_mask, settings.inpaint_mask_dilate_px)
+            uni = settings.unilateral_mask_dilate
+            left_mask = dilate_hole_mask(
+                left_mask, "left", settings.inpaint_mask_dilate_px, unilateral=uni,
+            )
+            right_mask = dilate_hole_mask(
+                right_mask, "right", settings.inpaint_mask_dilate_px, unilateral=uni,
+            )
 
         # --- Build background plate at processing resolution ---
         tight_px = settings.bg_plate_tight_dilate_px
@@ -124,6 +200,7 @@ class FullResWarpMethod(BaseStereoMethod):
         )
         full_mask_u8 = BgPlateFillMethod._build_bg_inpaint_mask(
             depth_f32, fg_mask, max_disp,
+            dilate_cap_px=settings.bg_plate_dilate_max_px,
         )
 
         if full_mask_u8 is not None:
@@ -165,8 +242,9 @@ class FullResWarpMethod(BaseStereoMethod):
             bg_depth = BgPlateFillMethod._build_bg_depth(depth_f32, full_mask_u8)
 
             # Warp background plate at full-res
-            bg_left, bg_left_mask = hybrid_zbuf_remap_eye(bg_plate, bg_depth, max_disp, "left")
-            bg_right, bg_right_mask = hybrid_zbuf_remap_eye(bg_plate, bg_depth, max_disp, "right")
+            bg_left, bg_left_mask, bg_right, bg_right_mask = self._warp_pair(
+                bg_plate, bg_depth, max_disp, crack,
+            )
 
             # --- Composite: sharp warped + tone-matched upscaled fills ---
             for eye_img, eye_mask, bg_img, bg_eye_mask in (
@@ -185,11 +263,14 @@ class FullResWarpMethod(BaseStereoMethod):
                 )
                 eye_img[:] = np.clip(blended, 0, 255).astype(np.uint8)
 
-                # Telea for any remaining holes in the bg plate warp itself
-                remaining = holes & (bg_eye_mask > 0)
+                # Sweep the seam.  Adding the plate warp's own unfilled
+                # pixels here reaches almost the whole disocclusion and
+                # smears away the plate's texture, so it is opt-in.
                 dist = cv2.distanceTransform(holes.astype(np.uint8), cv2.DIST_L2, 3)
-                border = holes & (dist <= _EDGE_TELEA_PX)
-                telea_mask = (border | remaining).astype(np.uint8) * 255
+                telea_mask = holes & (dist <= _EDGE_TELEA_PX)
+                if settings.fill_telea_residual:
+                    telea_mask = telea_mask | (holes & (bg_eye_mask > 0))
+                telea_mask = telea_mask.astype(np.uint8) * 255
                 if np.any(telea_mask):
                     bgr = cv2.cvtColor(eye_img, cv2.COLOR_RGB2BGR)
                     eye_img[:] = cv2.cvtColor(
@@ -216,3 +297,26 @@ class FullResWarpMethod(BaseStereoMethod):
                 eye_img[:] = np.clip(blended, 0, 255).astype(np.uint8)
 
         return left, right
+
+
+class LeftAnchoredWarpMethod(FullResWarpMethod):
+    name: ClassVar[str] = "anchored_left"
+    label: ClassVar[str] = "Anchored - Left Eye Is Original"
+    description: ClassVar[str] = (
+        "Left eye is the untouched source photo; the right eye carries the "
+        "full disparity. Same total parallax as the symmetric warp, but one "
+        "eye has nothing invented in it. Holes in the warped eye are roughly "
+        "twice as wide. Try both anchors - the clean eye may fuse better in "
+        "your dominant eye."
+    )
+    anchor_eye: ClassVar[EyeSide | None] = "left"
+
+
+class RightAnchoredWarpMethod(FullResWarpMethod):
+    name: ClassVar[str] = "anchored_right"
+    label: ClassVar[str] = "Anchored - Right Eye Is Original"
+    description: ClassVar[str] = (
+        "Right eye is the untouched source photo; the left eye carries the "
+        "full disparity. Mirror of Anchored - Left Eye Is Original."
+    )
+    anchor_eye: ClassVar[EyeSide | None] = "right"

@@ -21,10 +21,18 @@ def _populate() -> None:
     from pystereo_core.stereo.methods.combo_fill import ComboFillMethod
     from pystereo_core.stereo.methods.ldi_inpaint import LdiInpaintMethod
     from pystereo_core.stereo.methods.iterative_fill import IterativeFillMethod
-    from pystereo_core.stereo.methods.fullres_warp import FullResWarpMethod
+    from pystereo_core.stereo.methods.cutout_layers import CutoutLayersMethod
+    from pystereo_core.stereo.methods.fullres_warp import (
+        FullResWarpMethod,
+        LeftAnchoredWarpMethod,
+        RightAnchoredWarpMethod,
+    )
 
     _REGISTRY["per_eye_inpaint"] = PerEyeInpaintMethod
     _REGISTRY["fullres_warp"] = FullResWarpMethod
+    _REGISTRY["anchored_left"] = LeftAnchoredWarpMethod
+    _REGISTRY["anchored_right"] = RightAnchoredWarpMethod
+    _REGISTRY["cutout_layers"] = CutoutLayersMethod
     _REGISTRY["bg_plate_fill"] = BgPlateFillMethod
     _REGISTRY["routed_fill"] = RoutedFillMethod
     _REGISTRY["direct_fill"] = DirectFillMethod

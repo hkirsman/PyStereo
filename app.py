@@ -397,7 +397,7 @@ def api_depth_model_download() -> Any:
     """Download a specific depth model (small/base/large)."""
     from pystereo_core.download import get_download_manager
 
-    model_size = (request.json or {}).get("model", "small") if request.is_json else request.form.get("model", "small")
+    model_size = (request.json or {}).get("model", "small") if request.is_json else request.values.get("model", "small")
     model_size = model_size.strip().lower()
     if model_size not in ("small", "base", "large"):
         return jsonify({"error": f"Invalid model: {model_size}"}), 400
@@ -488,9 +488,9 @@ def transform() -> Any:
         gui_log("  Failed - stereo model not ready (download required)")
         return blocked
 
-    method_override = (request.form.get("method") or "").strip().lower() or None
-    max_dim_raw = (request.form.get("max_dim") or "").strip()
-    depth_model = (request.form.get("depth_model") or "small").strip().lower()
+    method_override = (request.values.get("method") or "").strip().lower() or None
+    max_dim_raw = (request.values.get("max_dim") or "").strip()
+    depth_model = (request.values.get("depth_model") or "small").strip().lower()
 
     _ensure_registry(model_size=depth_model)
     gui_log(f"Generating stereo SBS for {name}...")
@@ -570,9 +570,9 @@ def api_generate() -> Any:
     if blocked is not None:
         return blocked
 
-    method_override = (request.form.get("method") or "").strip().lower() or None
-    max_dim_raw = (request.form.get("max_dim") or "").strip()
-    depth_model = (request.form.get("depth_model") or "small").strip().lower()
+    method_override = (request.values.get("method") or "").strip().lower() or None
+    max_dim_raw = (request.values.get("max_dim") or "").strip()
+    depth_model = (request.values.get("depth_model") or "small").strip().lower()
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     result_id = str(uuid.uuid4())
     result_dir = OUTPUTS_DIR / result_id
@@ -628,6 +628,7 @@ def api_generate() -> Any:
                 active_pipeline = pipeline
 
             # Warp preview (pre-inpaint intermediates)
+            plate_img = None
             warp_result = active_pipeline.warp_preview(
                 rgb_pil, depth_f32, method=method_override,
             )
@@ -636,6 +637,13 @@ def api_generate() -> Any:
                     str(result_dir / "warp.jpg"), quality=95,
                 )
                 warp_result.mask_sbs.save(str(result_dir / "mask.png"))
+
+            # Inpainted background plate (what gets pasted into the holes)
+            plate_img = active_pipeline.inpaint_preview(
+                rgb_pil, depth_f32, method=method_override,
+            )
+            if plate_img is not None:
+                plate_img.save(str(result_dir / "inpaint.jpg"), quality=95)
 
             # Generate SBS
             sbs_img = active_pipeline.synthesize(
@@ -674,6 +682,8 @@ def api_generate() -> Any:
     if warp_result is not None:
         resp["warp_url"] = f"/api/results/{result_id}/warp.jpg"
         resp["mask_url"] = f"/api/results/{result_id}/mask.png"
+    if plate_img is not None:
+        resp["inpaint_url"] = f"/api/results/{result_id}/inpaint.jpg"
     return jsonify(resp)
 
 

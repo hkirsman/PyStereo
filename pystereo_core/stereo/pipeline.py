@@ -20,7 +20,11 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from pystereo_core.stereo.config import StereoMethodName, StereoSettings
+from pystereo_core.stereo.config import (
+    InpaintBackendName,
+    StereoMethodName,
+    StereoSettings,
+)
 from pystereo_core.stereo.depth import apply_depth_gamma, guided_filter_depth
 from pystereo_core.stereo.heal import heal_depth_with_mask
 from pystereo_core.stereo.inpaint import InpaintBackend, create_inpaint_backend
@@ -42,8 +46,9 @@ class _PreparedInput(NamedTuple):
     depth_f32: np.ndarray
     max_disp: float
     fg_mask: np.ndarray | None
-    method_name: str
+    method_name: StereoMethodName
     stereo_method: BaseStereoMethod
+    settings: StereoSettings
 
 
 class WarpPreviewResult(NamedTuple):
@@ -67,7 +72,11 @@ class StereoPipeline:
         inpainter: InpaintBackend | None = None,
     ) -> None:
         self.settings = settings or StereoSettings.from_env()
-        self._inpainter = inpainter or create_inpaint_backend(self.settings.inpaint_backend)
+        self._explicit_inpainter = inpainter
+        self._inpainters: dict[str, InpaintBackend] = {}
+        if inpainter is None:
+            backend = self.settings.inpaint_backend
+            self._inpainters[backend] = create_inpaint_backend(backend)
         self._segmenter: ForegroundSegmenter | None = None
         self._methods: dict[str, BaseStereoMethod] = {}
 
@@ -81,6 +90,20 @@ class StereoPipeline:
             self._methods[name] = get_method(name)
         return self._methods[name]
 
+    def _get_inpainter(self, backend: InpaintBackendName) -> InpaintBackend:
+        """Return the backend for *backend*, loading it on first use.
+
+        A per-call method override can select a different backend (e.g.
+        AOT-GAN), so the one built at construction is not always the right
+        one.  An explicitly injected inpainter always wins.
+        """
+        if self._explicit_inpainter is not None:
+            return self._explicit_inpainter
+        if backend not in self._inpainters:
+            logger.info("Loading %s inpaint backend on demand", backend)
+            self._inpainters[backend] = create_inpaint_backend(backend)
+        return self._inpainters[backend]
+
     def _preprocess(
         self,
         image: Image.Image,
@@ -92,6 +115,7 @@ class StereoPipeline:
         """Shared preprocessing: resize, depth healing, filter, gamma, disparity."""
         method_name = method or self.settings.stereo_method
         stereo_method = self._get_method(method_name)
+        settings = self.settings.resolved_for(method_name)
 
         rgb = image.convert("RGB")
         orig_w, orig_h = rgb.size
@@ -106,8 +130,8 @@ class StereoPipeline:
                 "Stereo [%s]: full-res bypass (%dx%d), method handles its own scaling",
                 method_name, orig_w, orig_h,
             )
-        elif max(orig_w, orig_h) > self.settings.max_processing_dim:
-            scale = self.settings.max_processing_dim / float(max(orig_w, orig_h))
+        elif max(orig_w, orig_h) > settings.max_processing_dim:
+            scale = settings.max_processing_dim / float(max(orig_w, orig_h))
             new_w = max(1, int(round(orig_w * scale)))
             new_h = max(1, int(round(orig_h * scale)))
             rgb = rgb.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -126,18 +150,18 @@ class StereoPipeline:
             depth_f32 = (depth_f32 - lo) / (hi - lo)
 
         fg_mask: np.ndarray | None = None
-        if self.settings.depth_healing:
+        if settings.depth_healing:
             try:
                 segmenter = self._ensure_segmenter()
                 fg_mask = segmenter.segment(
-                    rgb, padding=self.settings.segmenter_padding
+                    rgb, padding=settings.segmenter_padding
                 )
                 depth_f32 = heal_depth_with_mask(
                     depth_f32,
                     fg_mask,
-                    bg_threshold_ratio=self.settings.depth_healing_bg_threshold,
-                    edge_blur_sigma=self.settings.depth_healing_edge_blur_sigma,
-                    mask_dilate_px=self.settings.depth_healing_mask_dilate_px,
+                    bg_threshold_ratio=settings.depth_healing_bg_threshold,
+                    edge_blur_sigma=settings.depth_healing_edge_blur_sigma,
+                    mask_dilate_px=settings.depth_healing_mask_dilate_px,
                 )
             except Exception as exc:
                 logger.warning(
@@ -149,35 +173,35 @@ class StereoPipeline:
         depth_f32 = guided_filter_depth(
             depth_f32,
             rgb_arr,
-            radius=self.settings.guided_filter_radius,
-            eps=self.settings.guided_filter_eps,
+            radius=settings.guided_filter_radius,
+            eps=settings.guided_filter_eps,
         )
-        depth_f32 = apply_depth_gamma(depth_f32, self.settings.depth_gamma)
+        depth_f32 = apply_depth_gamma(depth_f32, settings.depth_gamma)
 
         ratio = (
             divergence_ratio
             if divergence_ratio is not None
-            else self.settings.divergence_ratio
+            else settings.divergence_ratio
         )
         max_disp = adaptive_max_disparity(
             depth_f32,
             rgb_arr.shape[1],
             base_ratio=ratio,
-            min_ratio=self.settings.min_divergence_ratio,
-            max_ratio=self.settings.max_divergence_ratio,
-            adaptive=self.settings.adaptive_depth,
+            min_ratio=settings.min_divergence_ratio,
+            max_ratio=settings.max_divergence_ratio,
+            adaptive=settings.adaptive_depth,
         )
         logger.info(
             "Stereo [%s]: %.1f px disp (%.2f%% of width), inpaint=%s, heal=%s",
             method_name,
             max_disp,
             100.0 * max_disp / rgb_arr.shape[1],
-            self.settings.inpaint_backend,
-            self.settings.depth_healing,
+            settings.inpaint_backend,
+            settings.depth_healing,
         )
 
         return _PreparedInput(rgb_arr, depth_f32, max_disp, fg_mask,
-                              method_name, stereo_method)
+                              method_name, stereo_method, settings)
 
     @staticmethod
     def _release_gpu_cache() -> None:
@@ -219,13 +243,30 @@ class StereoPipeline:
 
         left, right = p.stereo_method.warp_and_fill(
             p.rgb_arr, p.depth_f32, p.max_disp, p.fg_mask,
-            self.settings, self._inpainter,
+            p.settings, self._get_inpainter(p.settings.inpaint_backend),
         )
 
         self._release_gpu_cache()
 
         sbs_arr = _compose_sbs(left, right)
         return Image.fromarray(sbs_arr)
+
+    def inpaint_preview(
+        self,
+        image: Image.Image,
+        depth_map: Image.Image | np.ndarray,
+        *,
+        method: StereoMethodName | None = None,
+    ) -> Image.Image | None:
+        """Return the method's inpainted background plate, or None."""
+        p = self._preprocess(image, depth_map, method=method)
+        plate = p.stereo_method.inpaint_preview(
+            p.rgb_arr, p.depth_f32, p.max_disp, p.fg_mask, p.settings,
+            self._get_inpainter(p.settings.inpaint_backend),
+        )
+        if plate is None:
+            return None
+        return Image.fromarray(plate)
 
     def warp_preview(
         self,
@@ -238,7 +279,7 @@ class StereoPipeline:
         p = self._preprocess(image, depth_map, method=method)
 
         result = p.stereo_method.warp_preview(
-            p.rgb_arr, p.depth_f32, p.max_disp, p.fg_mask, self.settings,
+            p.rgb_arr, p.depth_f32, p.max_disp, p.fg_mask, p.settings,
         )
         if result is None:
             return None

@@ -37,6 +37,8 @@ const stageDepthImg = $("#stageDepthImg");
 const stageWarp = $("#stageWarp");
 const stageWarpImg = $("#stageWarpImg");
 const stageSbs = $("#stageSbs");
+const stageInpaint = $("#stageInpaint");
+const stageInpaintImg = $("#stageInpaintImg");
 const stageSbsImg = $("#stageSbsImg");
 const stageTiming = $("#stageTiming");
 
@@ -414,6 +416,7 @@ btnGenerate.addEventListener("click", async () => {
   stageOriginalImg.src = stageOriginalObjectUrl;
   stageDepth.hidden = true;
   stageWarp.hidden = true;
+  stageInpaint.hidden = true;
   stageSbs.hidden = true;
   stageTiming.textContent = "";
 
@@ -453,6 +456,14 @@ btnGenerate.addEventListener("click", async () => {
     if (data.warp_url) {
       stageWarpImg.src = data.warp_url;
       stageWarp.hidden = false;
+    }
+
+    // Show the inpainted background plate (what fills the disocclusions)
+    if (data.inpaint_url) {
+      stageInpaintImg.src = data.inpaint_url;
+      stageInpaint.hidden = false;
+    } else {
+      stageInpaint.hidden = true;
     }
 
     // Show SBS

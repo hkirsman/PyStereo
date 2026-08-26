@@ -26,7 +26,7 @@ import numpy as np
 from pystereo_core.stereo.config import StereoSettings
 from pystereo_core.stereo.inpaint import InpaintBackend
 from pystereo_core.stereo.methods.base import BaseStereoMethod
-from pystereo_core.stereo.warp import dilate_occlusion_mask, hybrid_zbuf_remap_eye
+from pystereo_core.stereo.warp import dilate_hole_mask, hybrid_zbuf_remap_eye
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +144,15 @@ class BgPlateFillMethod(BaseStereoMethod):
         max_disp: float,
         *,
         dilate_r_override: int | None = None,
+        dilate_cap_px: int = 0,
     ) -> np.ndarray | None:
         """Build a uint8 mask of foreground regions to inpaint away.
+
+        The dilation margin is derived from the disparity, which at large
+        disparities overshoots the disocclusion it needs to cover and eats
+        real background next to the subject.  *dilate_cap_px* bounds it;
+        0 leaves the derived value alone.  Ignored when *dilate_r_override*
+        is given, since that is already an explicit radius.
 
         Returns ``None`` when the mask covers >70 % of the image —
         the caller falls back to per-eye inpainting.
@@ -163,6 +170,13 @@ class BgPlateFillMethod(BaseStereoMethod):
             dilate_r = dilate_r_override
         else:
             dilate_r = max(1, int(max_disp * 0.6) + 3)
+            if dilate_cap_px > 0 and dilate_r > dilate_cap_px:
+                logger.info(
+                    "Background plate dilation capped: %d px → %d px "
+                    "(max_disp %.0f px)",
+                    dilate_r, dilate_cap_px, max_disp,
+                )
+                dilate_r = dilate_cap_px
         d = dilate_r * 2 + 1
         kern = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (d, d))
         dilated = cv2.dilate(base, kern)
@@ -195,6 +209,32 @@ class BgPlateFillMethod(BaseStereoMethod):
     # Core
     # ------------------------------------------------------------------
 
+    def inpaint_preview(
+        self,
+        rgb_arr: np.ndarray,
+        depth_f32: np.ndarray,
+        max_disp: float,
+        fg_mask: np.ndarray | None,
+        settings: StereoSettings,
+        inpainter: InpaintBackend,
+    ) -> np.ndarray | None:
+        full_mask = self._build_bg_inpaint_mask(
+            depth_f32, fg_mask, max_disp,
+            dilate_cap_px=settings.bg_plate_dilate_max_px,
+        )
+        if full_mask is None:
+            return None
+        tight = settings.bg_plate_tight_dilate_px
+        lama_mask = full_mask
+        if tight > 0:
+            tight_mask = self._build_bg_inpaint_mask(
+                depth_f32, fg_mask, max_disp, dilate_r_override=tight,
+            )
+            if tight_mask is not None:
+                lama_mask = tight_mask
+        plate = inpainter.inpaint(rgb_arr, lama_mask)
+        return _match_inpaint_color(rgb_arr, plate, lama_mask)
+
     def warp_and_fill(
         self,
         rgb_arr: np.ndarray,
@@ -206,19 +246,21 @@ class BgPlateFillMethod(BaseStereoMethod):
     ) -> tuple[np.ndarray, np.ndarray]:
         h, w = rgb_arr.shape[:2]
 
+        crack = settings.warp_crack_fill_px
         left, left_mask = hybrid_zbuf_remap_eye(
-            rgb_arr, depth_f32, max_disp, "left"
+            rgb_arr, depth_f32, max_disp, "left", crack_fill_px=crack,
         )
         right, right_mask = hybrid_zbuf_remap_eye(
-            rgb_arr, depth_f32, max_disp, "right"
+            rgb_arr, depth_f32, max_disp, "right", crack_fill_px=crack,
         )
 
         if settings.inpaint_mask_dilate_px > 0:
-            left_mask = dilate_occlusion_mask(
-                left_mask, settings.inpaint_mask_dilate_px
+            uni = settings.unilateral_mask_dilate
+            left_mask = dilate_hole_mask(
+                left_mask, "left", settings.inpaint_mask_dilate_px, unilateral=uni,
             )
-            right_mask = dilate_occlusion_mask(
-                right_mask, settings.inpaint_mask_dilate_px
+            right_mask = dilate_hole_mask(
+                right_mask, "right", settings.inpaint_mask_dilate_px, unilateral=uni,
             )
 
         tight_px = settings.bg_plate_tight_dilate_px
@@ -229,7 +271,10 @@ class BgPlateFillMethod(BaseStereoMethod):
             if tight_px > 0
             else None
         )
-        full_mask_u8 = self._build_bg_inpaint_mask(depth_f32, fg_mask, max_disp)
+        full_mask_u8 = self._build_bg_inpaint_mask(
+            depth_f32, fg_mask, max_disp,
+            dilate_cap_px=settings.bg_plate_dilate_max_px,
+        )
 
         if full_mask_u8 is not None:
             lama_mask = tight_mask_u8 if tight_mask_u8 is not None else full_mask_u8
@@ -280,9 +325,10 @@ class BgPlateFillMethod(BaseStereoMethod):
                 dist = cv2.distanceTransform(
                     holes.astype(np.uint8), cv2.DIST_L2, 3
                 )
-                border = holes & (dist <= _EDGE_TELEA_PX)
-                remaining = holes & (bg_eye_mask > 0)
-                telea_mask = (border | remaining).astype(np.uint8) * 255
+                telea_mask = holes & (dist <= _EDGE_TELEA_PX)
+                if settings.fill_telea_residual:
+                    telea_mask = telea_mask | (holes & (bg_eye_mask > 0))
+                telea_mask = telea_mask.astype(np.uint8) * 255
                 if np.any(telea_mask):
                     bgr = cv2.cvtColor(eye_img, cv2.COLOR_RGB2BGR)
                     eye_img[:] = cv2.cvtColor(

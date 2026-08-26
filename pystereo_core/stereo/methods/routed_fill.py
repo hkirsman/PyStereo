@@ -30,7 +30,11 @@ from pystereo_core.stereo.methods.bg_plate_fill import (
     _match_inpaint_color,
     _sharpen_inpainted_region,
 )
-from pystereo_core.stereo.warp import EyeSide, hybrid_zbuf_remap_eye
+from pystereo_core.stereo.warp import (
+    EyeSide,
+    hybrid_zbuf_remap_eye,
+    unilateral_dilate_occlusion_mask as _unilateral_dilate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,29 +42,6 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 # Unilateral (directional) mask dilation
 # ------------------------------------------------------------------
-
-def _unilateral_dilate(
-    mask: np.ndarray,
-    eye: EyeSide,
-    pixels: int = 4,
-) -> np.ndarray:
-    """Dilate occlusion mask toward the foreground side only.
-
-    DIBR geometry guarantees a fixed relationship between eye side and
-    foreground/background placement around each hole:
-
-      left eye  → holes appear left of foreground → fg RIGHT → extend right
-      right eye → holes appear right of foreground → fg LEFT  → extend left
-    """
-    if pixels <= 0:
-        return mask.copy()
-
-    kw = pixels + 1
-    kern = np.ones((1, kw), dtype=np.uint8)
-
-    if eye == "left":
-        return cv2.dilate(mask, kern, anchor=(kw - 1, 0), iterations=1)
-    return cv2.dilate(mask, kern, anchor=(0, 0), iterations=1)
 
 
 # ------------------------------------------------------------------
@@ -326,6 +307,7 @@ class RoutedFillMethod(BaseStereoMethod):
         right: np.ndarray,
         left_wide: np.ndarray,
         right_wide: np.ndarray,
+        dilate_cap_px: int = 0,
     ) -> bool:
         """Build a bg plate via banded inpainting, warp, paste, Poisson blend.
 
@@ -343,7 +325,7 @@ class RoutedFillMethod(BaseStereoMethod):
             depth_f32, fg_mask, max_disp, dilate_r_override=_TIGHT_DILATE,
         )
         full_mask = BgPlateFillMethod._build_bg_inpaint_mask(
-            depth_f32, fg_mask, max_disp,
+            depth_f32, fg_mask, max_disp, dilate_cap_px=dilate_cap_px,
         )
         if full_mask is None:
             return False
@@ -446,6 +428,7 @@ class RoutedFillMethod(BaseStereoMethod):
             ok = self._fill_wide_bg_plate(
                 rgb_arr, depth_f32, max_disp, fg_mask, inpainter,
                 left, right, left_wide, right_wide,
+                settings.bg_plate_dilate_max_px,
             )
             if not ok:
                 remaining_left = np.maximum(remaining_left, left_wide)

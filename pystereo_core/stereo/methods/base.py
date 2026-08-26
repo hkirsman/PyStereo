@@ -65,6 +65,24 @@ class BaseStereoMethod(ABC):
             ``(H, W, 3)`` uint8 RGB — right eye view, holes filled.
         """
 
+    def inpaint_preview(
+        self,
+        rgb_arr: np.ndarray,
+        depth_f32: np.ndarray,
+        max_disp: float,
+        fg_mask: np.ndarray | None,
+        settings: StereoSettings,
+        inpainter: InpaintBackend,
+    ) -> np.ndarray | None:
+        """Return the inpainted background plate, before any warping.
+
+        This is the content the method will paste into disocclusions, so it
+        is what to look at when judging fill quality — the final SBS only
+        ever shows narrow slivers of it.  ``None`` when the method has no
+        plate (it inpaints each warped eye directly instead).
+        """
+        return None
+
     def warp_preview(
         self,
         rgb_arr: np.ndarray,

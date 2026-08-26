@@ -7,11 +7,91 @@ from dataclasses import dataclass, fields, replace
 from typing import Any, Literal
 
 InpaintBackendName = Literal["lama", "opencv", "none", "flux", "aotgan"]
-StereoMethodName = Literal["per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill"]
+StereoMethodName = Literal[
+    "per_eye_inpaint", "fullres_warp", "anchored_left", "anchored_right",
+    "cutout_layers", "bg_plate_fill", "routed_fill", "direct_fill",
+    "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill",
+]
 DepthModelSize = Literal["small", "base", "large"]
 
 DEFAULT_METHOD: StereoMethodName = "per_eye_inpaint"
 DEFAULT_DEPTH_MODEL: DepthModelSize = "small"
+
+METHOD_NAMES: tuple[str, ...] = (
+    "per_eye_inpaint", "fullres_warp", "anchored_left", "anchored_right",
+    "cutout_layers", "bg_plate_fill", "routed_fill", "direct_fill",
+    "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill",
+)
+INPAINT_BACKEND_NAMES: tuple[str, ...] = (
+    "lama", "opencv", "none", "flux", "aotgan",
+)
+
+
+def env_tuning_overrides() -> dict[str, Any]:
+    """Return tuning fields that were explicitly set via environment vars.
+
+    Kept separate from :meth:`StereoSettings.from_env` so the same values
+    can be re-applied on top of a method's ``SETTING_OVERRIDES`` whenever
+    the method changes — see :meth:`StereoSettings.resolved_for`.  An
+    explicit env var always wins over a method default.
+    """
+    overrides: dict[str, Any] = {}
+
+    guided_eps_raw = os.environ.get("PYSTEREO_GUIDED_EPS")
+    if guided_eps_raw:
+        try:
+            overrides["guided_filter_eps"] = max(1e-6, float(guided_eps_raw))
+        except ValueError:
+            pass
+
+    depth_gamma_raw = os.environ.get("PYSTEREO_DEPTH_GAMMA")
+    if depth_gamma_raw:
+        try:
+            overrides["depth_gamma"] = max(0.1, float(depth_gamma_raw))
+        except ValueError:
+            pass
+
+    narrow_px_raw = os.environ.get("PYSTEREO_NARROW_PX")
+    if narrow_px_raw:
+        try:
+            overrides["narrow_strip_max_px"] = max(1, int(narrow_px_raw))
+        except ValueError:
+            pass
+
+    residual_raw = os.environ.get("PYSTEREO_TELEA_RESIDUAL")
+    if residual_raw:
+        overrides["fill_telea_residual"] = (
+            residual_raw.strip().lower() not in ("0", "false", "no", "off")
+        )
+
+    crack_raw = os.environ.get("PYSTEREO_CRACK_FILL")
+    if crack_raw:
+        try:
+            overrides["warp_crack_fill_px"] = max(0, int(crack_raw))
+        except ValueError:
+            pass
+
+    uni_raw = os.environ.get("PYSTEREO_UNILATERAL_DILATE")
+    if uni_raw:
+        overrides["unilateral_mask_dilate"] = (
+            uni_raw.strip().lower() not in ("0", "false", "no", "off")
+        )
+
+    plate_dilate_raw = os.environ.get("PYSTEREO_PLATE_DILATE")
+    if plate_dilate_raw:
+        try:
+            overrides["bg_plate_dilate_max_px"] = max(0, int(plate_dilate_raw))
+        except ValueError:
+            pass
+
+    tight_dilate_raw = os.environ.get("PYSTEREO_TIGHT_DILATE")
+    if tight_dilate_raw:
+        try:
+            overrides["bg_plate_tight_dilate_px"] = max(0, int(tight_dilate_raw))
+        except ValueError:
+            pass
+
+    return overrides
 
 
 @dataclass(frozen=True)
@@ -42,6 +122,25 @@ class StereoSettings:
     segmenter_padding: int = 200
     narrow_strip_max_px: int = 12
     bg_plate_tight_dilate_px: int = 10
+    # The background plate erases the subject plus a margin so the inpainter
+    # has room to work.  The margin is derived from the disparity
+    # (``max_disp * 0.6 + 3``), which at large disparities grows far wider
+    # than the disocclusion it needs to cover and destroys real background
+    # near the subject — thin gaps between limb and torso, ground lines
+    # passing behind them.  This caps it.  0 disables the cap.
+    bg_plate_dilate_max_px: int = 24
+    # Widest horizontal gap in the forward-splat z-buffer still treated as
+    # a sampling crack rather than a disocclusion.  0 disables.
+    warp_crack_fill_px: int = 2
+    # Dilate hole masks toward the background side only, so the margin
+    # given to the inpainter is not taken out of the foreground.
+    unilateral_mask_dilate: bool = True
+    # After compositing the background plate, Telea-sweep the pixels the
+    # plate warp itself could not fill.  That mask reaches ~96% of the
+    # disocclusion, so the sweep discards the plate's inpainted texture
+    # and replaces it with diffusion smear.  Off: sweep only the seam.
+    fill_telea_residual: bool = False
+
     def with_method_defaults(self) -> StereoSettings:
         """Return a copy with method-specific overrides applied.
 
@@ -62,6 +161,20 @@ class StereoSettings:
             return self
         return replace(self, **filtered)
 
+    def resolved_for(self, method: StereoMethodName | None) -> StereoSettings:
+        """Return settings with *method* active and its overrides applied.
+
+        A per-call method override must bring its own ``SETTING_OVERRIDES``
+        with it; otherwise the method's warp/fill code runs against whatever
+        method was active when the pipeline was constructed.  Explicit env
+        tuning is re-applied last so it still wins.
+        """
+        if method is None or method == self.stereo_method:
+            return self
+        base = replace(self, stereo_method=method).with_method_defaults()
+        env = env_tuning_overrides()
+        return replace(base, **env) if env else base
+
     @classmethod
     def from_env(cls, *, method: StereoMethodName | None = None) -> StereoSettings:
         """Build settings from environment variables.
@@ -71,12 +184,12 @@ class StereoSettings:
         """
         method_raw = method or os.environ.get("PYSTEREO_METHOD", "").strip().lower()
         stereo_method: StereoMethodName = DEFAULT_METHOD
-        if method_raw in ("per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill"):
+        if method_raw in METHOD_NAMES:
             stereo_method = method_raw  # type: ignore[assignment]
 
         backend_raw = os.environ.get("PYSTEREO_INPAINT", "lama").strip().lower()
         backend: InpaintBackendName = "lama"
-        if backend_raw in ("lama", "opencv", "none", "flux", "aotgan"):
+        if backend_raw in INPAINT_BACKEND_NAMES:
             backend = backend_raw  # type: ignore[assignment]
 
         divergence_pct = os.environ.get("PYSTEREO_DIVERGENCE")
@@ -108,30 +221,7 @@ class StereoSettings:
         )
         base = base.with_method_defaults()
 
-        # Env-var overrides (only applied when explicitly set)
-        overrides: dict[str, Any] = {}
-
-        guided_eps_raw = os.environ.get("PYSTEREO_GUIDED_EPS")
-        if guided_eps_raw:
-            try:
-                overrides["guided_filter_eps"] = max(1e-6, float(guided_eps_raw))
-            except ValueError:
-                pass
-
-        depth_gamma_raw = os.environ.get("PYSTEREO_DEPTH_GAMMA")
-        if depth_gamma_raw:
-            try:
-                overrides["depth_gamma"] = max(0.1, float(depth_gamma_raw))
-            except ValueError:
-                pass
-
-        narrow_px_raw = os.environ.get("PYSTEREO_NARROW_PX")
-        if narrow_px_raw:
-            try:
-                overrides["narrow_strip_max_px"] = max(1, int(narrow_px_raw))
-            except ValueError:
-                pass
-
+        overrides = env_tuning_overrides()
         if overrides:
             base = replace(base, **overrides)
 
