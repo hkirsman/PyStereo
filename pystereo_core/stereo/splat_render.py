@@ -9,7 +9,7 @@ tolerance of that surface for anti-aliased edges. Pure torch (MPS or CPU).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import cv2
 import numpy as np
@@ -19,6 +19,11 @@ R_MAX = 7
 HARD_T = 0.35
 SOFT_T = 0.04
 DEPTH_TOL = 0.03
+ALPHA_MAX = 0.99       # per-Gaussian alpha clamp (standard 3DGS)
+ALPHA_BAND_ROWS = 32   # rows composited per sort in composite_alpha_torch
+MEDIAN_ALPHA = 0.5     # accumulated alpha that defines the median depth
+
+RenderMode = Literal["zbuf", "alpha"]
 
 
 def _device() -> torch.device:
@@ -119,13 +124,19 @@ class SharpScene:
 
     @torch.no_grad()
     def render(
-        self, eye_x: float, cx_shift: float,
+        self, eye_x: float, cx_shift: float, mode: RenderMode = "zbuf",
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Render from a camera at (eye_x, 0, 0) with principal point shifted.
+
+        ``mode``: ``"zbuf"`` - front-surface z-buffer + blend (fast, soft);
+        ``"alpha"`` - depth-sorted front-to-back alpha compositing with
+        median depth, the rule SHARP was trained with (sharper, ~5x slower).
 
         Returns (rgb float linear HxWx3, depth HxW metres, hole mask uint8).
         """
         p = self.project(eye_x, cx_shift)
+        if mode == "alpha":
+            return composite_alpha_torch(p)
         return composite_ewa_torch(p)
 
 
@@ -174,6 +185,103 @@ def composite_ewa_torch(p: _Projected) -> tuple[np.ndarray, np.ndarray, np.ndarr
     depth = zbuf.reshape(H, W).cpu().numpy()
     depth[~np.isfinite(depth)] = np.nan
     return rgb, depth, holes.reshape(H, W).cpu().numpy().astype(np.uint8) * 255
+
+
+def composite_alpha_torch(p: _Projected) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Depth-sorted front-to-back alpha compositing (proper 3DGS rendering).
+
+    Per pixel ``C = sum_i T_i a_i c_i`` with ``T_i = prod_{j<i} (1 - a_j)`` over
+    Gaussians sorted by depth, ``a_i`` = opacity * Gaussian falloff clamped to
+    ``ALPHA_MAX``. Depth is the median depth: z of the Gaussian at which the
+    accumulated alpha first reaches ``MEDIAN_ALPHA`` (nearest contribution if
+    it never does). Rows are processed in bands so every contribution of a
+    band can be sorted at once; the sort dominates the runtime.
+    """
+    W, H, dev = p.W, p.H, p.dev
+    order = torch.argsort(p.z)
+    u, v, z = p.u[order], p.v[order], p.z[order]
+    inv, radius = p.inv[order], p.radius[order]
+    col, op, pu, pv = p.col[order], p.op[order], p.pu[order], p.pv[order]
+
+    rgb = torch.zeros((H * W, 3), device=dev)
+    depth = torch.full((H * W,), float("nan"), device=dev)
+    alpha_acc = torch.zeros((H * W,), device=dev)
+    offsets = [
+        (dx, dy)
+        for dy in range(-R_MAX, R_MAX + 1)
+        for dx in range(-R_MAX, R_MAX + 1)
+    ]
+    for y0 in range(0, H, ALPHA_BAND_ROWS):
+        y1 = min(H, y0 + ALPHA_BAND_ROWS)
+        in_band = (pv >= y0 - R_MAX) & (pv < y1 + R_MAX)
+        if not bool(in_band.any()):
+            continue
+        bu, bv, bz = u[in_band], v[in_band], z[in_band]
+        binv, brad = inv[in_band], radius[in_band]
+        bcol, bop, bpu, bpv = col[in_band], op[in_band], pu[in_band], pv[in_band]
+        idx_l: list[torch.Tensor] = []
+        a_l: list[torch.Tensor] = []
+        z_l: list[torch.Tensor] = []
+        c_l: list[torch.Tensor] = []
+        for dx, dy in offsets:
+            px, py = bpu + dx, bpv + dy
+            ok = (
+                (px >= 0) & (px < W) & (py >= y0) & (py < y1)
+                & (abs(dx) <= brad) & (abs(dy) <= brad)
+            )
+            if not bool(ok.any()):
+                continue
+            d0, d1 = (px - bu)[ok], (py - bv)[ok]
+            q = (
+                binv[ok, 0, 0] * d0 * d0
+                + 2 * binv[ok, 0, 1] * d0 * d1
+                + binv[ok, 1, 1] * d1 * d1
+            )
+            a = torch.clamp(bop[ok] * torch.exp(-0.5 * q), max=ALPHA_MAX)
+            good = a > SOFT_T
+            idx_l.append(((py[ok] - y0) * W + px[ok]).long()[good])
+            a_l.append(a[good])
+            z_l.append(bz[ok][good])
+            c_l.append(bcol[ok][good])
+        if not idx_l:
+            continue
+        idx, a = torch.cat(idx_l), torch.cat(a_l)
+        zc, c = torch.cat(z_l), torch.cat(c_l)
+        # Sort by (pixel, depth): depth first, then a stable sort by pixel.
+        o = torch.argsort(zc)
+        idx, a, zc, c = idx[o], a[o], zc[o], c[o]
+        o = torch.argsort(idx, stable=True)
+        idx, a, zc, c = idx[o], a[o], zc[o], c[o]
+        n_px = (y1 - y0) * W
+        # Exclusive cumulative product of (1 - a) within each pixel segment,
+        # done as a cumulative sum in log space.
+        log_t = torch.cumsum(torch.log1p(-a), 0)
+        first = torch.ones_like(idx, dtype=torch.bool)
+        first[1:] = idx[1:] != idx[:-1]
+        pos = torch.arange(len(idx), device=dev)
+        seg_start = torch.cummax(torch.where(first, pos, torch.zeros_like(pos)), 0).values
+        log_t_before = log_t - log_t[seg_start] + torch.log1p(-a[seg_start])
+        log_t_before = torch.where(first, torch.zeros_like(log_t_before), log_t_before)
+        t_before = torch.exp(log_t_before)
+        w = t_before * a
+        acc = torch.zeros((n_px, 3), device=dev).index_add_(0, idx, c * w[:, None])
+        asum = torch.zeros((n_px,), device=dev).index_add_(0, idx, w)
+        acc_after = 1 - t_before * (1 - a)
+        hit = acc_after >= MEDIAN_ALPHA
+        med = torch.full((n_px,), float("inf"), device=dev)
+        med.scatter_reduce_(0, idx[hit], zc[hit], reduce="amin")
+        nearest = torch.full((n_px,), float("inf"), device=dev)
+        nearest.scatter_reduce_(0, idx, zc, reduce="amin")
+        med = torch.where(torch.isfinite(med), med, nearest)
+        sl = slice(y0 * W, y1 * W)
+        rgb[sl] = acc / torch.clamp(asum, min=1e-4)[:, None]
+        alpha_acc[sl] = asum
+        depth[sl] = torch.where(
+            torch.isfinite(med), med, torch.full_like(med, float("nan")),
+        )
+
+    holes = (alpha_acc < 0.01).reshape(H, W).cpu().numpy().astype(np.uint8) * 255
+    return rgb.reshape(H, W, 3).cpu().numpy(), depth.reshape(H, W).cpu().numpy(), holes
 
 
 def detail_transfer(
@@ -241,6 +349,7 @@ def render_stereo(
     converge_m: float | None,
     subject_mask: np.ndarray | None,
     photo: np.ndarray | None = None,
+    mode: RenderMode = "zbuf",
 ) -> dict[str, Any]:
     """Render a stereo pair from a SHARP Gaussian scene.
 
@@ -258,6 +367,8 @@ def render_stereo(
     photo:
         Original photo as ``(H, W, 3)`` uint8 sRGB for detail transfer.
         If ``None``, both eyes are pure splat renders.
+    mode:
+        Compositing rule, see :meth:`SharpScene.render`.
 
     Returns
     -------
@@ -267,7 +378,7 @@ def render_stereo(
     scene = SharpScene(npz_path)
     f = scene.f_px
 
-    _, d0, _ = scene.render(0.0, 0.0)
+    _, d0, _ = scene.render(0.0, 0.0, mode=mode)
     if converge_m is None:
         if subject_mask is not None and subject_mask.any():
             converge_m = float(np.nanmedian(d0[subject_mask]))
@@ -275,8 +386,8 @@ def render_stereo(
             converge_m = float(np.nanpercentile(d0, 10))
 
     shift = f * baseline_m / (2 * converge_m)
-    l_rgb, l_d, l_h = scene.render(-baseline_m / 2, -shift)
-    r_rgb, r_d, r_h = scene.render(+baseline_m / 2, +shift)
+    l_rgb, l_d, l_h = scene.render(-baseline_m / 2, -shift, mode=mode)
+    r_rgb, r_d, r_h = scene.render(+baseline_m / 2, +shift, mode=mode)
 
     def finish(rgb: np.ndarray, holes: np.ndarray) -> np.ndarray:
         img = (linear_to_srgb(rgb) * 255).astype(np.uint8)

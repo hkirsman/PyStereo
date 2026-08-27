@@ -9,6 +9,7 @@ Two variants that bypass the depth-map pipeline entirely:
   original photo wherever the original camera could see that surface
   (~95% of pixels); splat colour only in the disoccluded band.
 - ``sharp_hires``: sharp_detail with SHARP run at 2688^2 (1344^2 grid).
+- ``sharp_alpha``: sharp_hires with depth-sorted alpha compositing.
 
 SHARP weights are research-only (Apple ML Research license). These
 methods are opt-in and clearly labelled non-commercial.
@@ -25,6 +26,7 @@ from PIL import Image
 from pystereo_core.stereo.config import StereoSettings
 from pystereo_core.stereo.inpaint import InpaintBackend
 from pystereo_core.stereo.methods.base import BaseStereoMethod
+from pystereo_core.stereo.splat_render import RenderMode
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ class _SharpBase(BaseStereoMethod):
     needs_depth: ClassVar[bool] = False
     _detail_transfer: ClassVar[bool] = False
     _internal: ClassVar[int] = 1536  # SHARP internal size, see sharp_predict.predict_gaussians
+    _render_mode: ClassVar[RenderMode] = "zbuf"
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {}
 
@@ -78,6 +81,7 @@ class _SharpBase(BaseStereoMethod):
             converge_m=None,
             subject_mask=subject_mask,
             photo=photo,
+            mode=self._render_mode,
         )
 
         notes = result.get("notes", {})
@@ -128,6 +132,21 @@ class SharpHiresMethod(_SharpBase):
     )
     _detail_transfer: ClassVar[bool] = True
     _internal: ClassVar[int] = 2688
+
+
+class SharpAlphaMethod(_SharpBase):
+    name: ClassVar[str] = "sharp_alpha"
+    label: ClassVar[str] = "SHARP Alpha"
+    description: ClassVar[str] = (
+        "sharp_hires rendered with proper 3DGS compositing: Gaussians "
+        "depth-sorted per pixel and alpha-blended front to back, median "
+        "depth. Cleanest silhouettes and sharpest disocclusion band of the "
+        "SHARP methods. Slow: about 2 min per photo on an M-series Mac "
+        "(the per-pixel sort runs in torch). Research-only license."
+    )
+    _detail_transfer: ClassVar[bool] = True
+    _internal: ClassVar[int] = 2688
+    _render_mode: ClassVar[RenderMode] = "alpha"
 
 
 class SharpDepthMethod(_SharpBase):
