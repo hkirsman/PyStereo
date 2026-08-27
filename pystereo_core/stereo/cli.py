@@ -61,7 +61,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--method",
         type=str,
         default=None,
-        help="Stereo method (default: per_eye_inpaint). SHARP methods: sharp_splat, sharp_detail, sharp_hires, sharp_alpha, sharp_depth, sharp_mesh, sharp_taichi.",
+        help="Stereo method (default: per_eye_inpaint). SHARP methods: sharp_splat, sharp_detail, sharp_hires, sharp_alpha, sharp_alpha_taichi, sharp_depth, sharp_mesh, sharp_taichi.",
     )
     parser.add_argument(
         "--no-heal",

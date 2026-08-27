@@ -10,6 +10,7 @@ Two variants that bypass the depth-map pipeline entirely:
   (~95% of pixels); splat colour only in the disoccluded band.
 - ``sharp_hires``: sharp_detail with SHARP run at 2688^2 (1344^2 grid).
 - ``sharp_alpha``: sharp_hires with depth-sorted alpha compositing.
+- ``sharp_alpha_taichi``: sharp_alpha via the taichi tile rasteriser.
 
 SHARP weights are research-only (Apple ML Research license). These
 methods are opt-in and clearly labelled non-commercial.
@@ -147,6 +148,21 @@ class SharpAlphaMethod(_SharpBase):
     _detail_transfer: ClassVar[bool] = True
     _internal: ClassVar[int] = 2688
     _render_mode: ClassVar[RenderMode] = "alpha"
+
+
+class SharpAlphaTaichiMethod(_SharpBase):
+    name: ClassVar[str] = "sharp_alpha_taichi"
+    label: ClassVar[str] = "SHARP Alpha (taichi)"
+    description: ClassVar[str] = (
+        "Same output as sharp_alpha, rendered by a taichi tile rasteriser "
+        "on Metal/GPU: the render step drops from about 2 min to under a "
+        "second, leaving SHARP prediction (~90 s at 2688^2) as the only "
+        "cost. Needs taichi (pip install taichi, Python <= 3.13); falls "
+        "back to the torch renderer otherwise. Research-only license."
+    )
+    _detail_transfer: ClassVar[bool] = True
+    _internal: ClassVar[int] = 2688
+    _render_mode: ClassVar[RenderMode] = "alpha_taichi"
 
 
 class SharpDepthMethod(_SharpBase):

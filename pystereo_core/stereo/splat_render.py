@@ -23,7 +23,7 @@ ALPHA_MAX = 0.99       # per-Gaussian alpha clamp (standard 3DGS)
 ALPHA_BAND_ROWS = 32   # rows composited per sort in composite_alpha_torch
 MEDIAN_ALPHA = 0.5     # accumulated alpha that defines the median depth
 
-RenderMode = Literal["zbuf", "alpha"]
+RenderMode = Literal["zbuf", "alpha", "alpha_taichi"]
 
 
 def _device() -> torch.device:
@@ -130,11 +130,19 @@ class SharpScene:
 
         ``mode``: ``"zbuf"`` - front-surface z-buffer + blend (fast, soft);
         ``"alpha"`` - depth-sorted front-to-back alpha compositing with
-        median depth, the rule SHARP was trained with (sharper, ~5x slower).
+        median depth, the rule SHARP was trained with (sharper, ~5x slower);
+        ``"alpha_taichi"`` - the same via a taichi tile rasteriser (sub-second),
+        falling back to ``"alpha"`` when taichi is not available.
 
         Returns (rgb float linear HxWx3, depth HxW metres, hole mask uint8).
         """
         p = self.project(eye_x, cx_shift)
+        if mode == "alpha_taichi":
+            from pystereo_core.stereo.taichi_render import composite_alpha_taichi, is_taichi_available
+
+            if is_taichi_available():
+                return composite_alpha_taichi(p)
+            mode = "alpha"
         if mode == "alpha":
             return composite_alpha_torch(p)
         return composite_ewa_torch(p)

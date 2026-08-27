@@ -29,5 +29,9 @@ huggingface_hub
 scipy
 pillow-heif
 
+# Optional: GPU splat rasteriser for sharp_taichi / sharp_alpha_taichi
+# (wheels for Python 3.9-3.13; torch fallback is used without it)
+# taichi
+
 # Optional: Qt desktop GUI
 # PySide6-Essentials

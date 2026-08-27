@@ -27,6 +27,7 @@ def _populate() -> None:
         SharpDetailMethod,
         SharpHiresMethod,
         SharpAlphaMethod,
+        SharpAlphaTaichiMethod,
         SharpMeshMethod,
         SharpSplatMethod,
         SharpTaichiMethod,
@@ -45,6 +46,7 @@ def _populate() -> None:
     _REGISTRY["sharp_detail"] = SharpDetailMethod
     _REGISTRY["sharp_hires"] = SharpHiresMethod
     _REGISTRY["sharp_alpha"] = SharpAlphaMethod
+    _REGISTRY["sharp_alpha_taichi"] = SharpAlphaTaichiMethod
     _REGISTRY["sharp_depth"] = SharpDepthMethod
     _REGISTRY["sharp_mesh"] = SharpMeshMethod
     _REGISTRY["sharp_taichi"] = SharpTaichiMethod
