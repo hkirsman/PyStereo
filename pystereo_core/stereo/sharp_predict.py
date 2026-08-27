@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -85,6 +86,17 @@ def _spn_forward_any_size(self: torch.nn.Module, x: torch.Tensor) -> list[torch.
     x_lowres = cw(self, self.upsample_lowres, x_lowres)
     x_lowres = cw(self, self.fuse_lowres, torch.cat((x2_features, x_lowres), dim=1))
     return [x_latent0, x_latent1, x0_features, x1_features, x_lowres]
+
+
+_REQUIRED_KEYS = frozenset({"means", "scales", "quats", "colors", "opacities", "f_px", "width", "height"})
+
+
+def _cache_is_complete(path: Path) -> bool:
+    try:
+        with np.load(path) as d:
+            return _REQUIRED_KEYS <= set(d.files)
+    except Exception:
+        return False
 
 
 def validate_internal(internal: int) -> int:
@@ -201,8 +213,11 @@ def predict_gaussians(
     tag = "" if internal == DEFAULT_INTERNAL else f"_{internal}"
     out = cache / f"sharp_{_image_hash(img)}{tag}.npz"
     if out.exists():
-        logger.info("SHARP cache hit: %s", out.name)
-        return out
+        if _cache_is_complete(out):
+            logger.info("SHARP cache hit: %s", out.name)
+            return out
+        logger.warning("SHARP cache file %s is incomplete, regenerating", out.name)
+        out.unlink()
 
     ckpt = _ckpt_path()
     if not ckpt.is_file():
@@ -229,8 +244,11 @@ def predict_gaussians(
         spn_encoder.SlidingPyramidNetwork.forward = _spn_forward_any_size  # type: ignore[method-assign]
     g = _predict_image(predictor, img, f_px, torch.device(device), internal=internal)
 
+    # Write to a temp file and rename so an interrupted run (killed request,
+    # app restart) never leaves a truncated archive behind as a cache hit.
+    tmp = out.with_suffix(".npz.tmp")
     np.savez_compressed(
-        out,
+        tmp,
         means=g.mean_vectors[0].cpu().numpy(),
         scales=g.singular_values[0].cpu().numpy().astype(np.float16),
         quats=g.quaternions[0].cpu().numpy().astype(np.float16),
@@ -242,6 +260,7 @@ def predict_gaussians(
         color_space="linearRGB",
         internal=internal,
     )
+    os.replace(tmp, out)
 
     del predictor
     if torch.backends.mps.is_available():
