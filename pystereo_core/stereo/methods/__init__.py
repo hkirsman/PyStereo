@@ -25,6 +25,7 @@ def _populate() -> None:
     from pystereo_core.stereo.methods.sharp_splat import (
         SharpDepthMethod,
         SharpDetailMethod,
+        SharpHiresMethod,
         SharpMeshMethod,
         SharpSplatMethod,
         SharpTaichiMethod,
@@ -41,6 +42,7 @@ def _populate() -> None:
     _REGISTRY["iterative_fill"] = IterativeFillMethod
     _REGISTRY["sharp_splat"] = SharpSplatMethod
     _REGISTRY["sharp_detail"] = SharpDetailMethod
+    _REGISTRY["sharp_hires"] = SharpHiresMethod
     _REGISTRY["sharp_depth"] = SharpDepthMethod
     _REGISTRY["sharp_mesh"] = SharpMeshMethod
     _REGISTRY["sharp_taichi"] = SharpTaichiMethod

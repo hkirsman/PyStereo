@@ -7,7 +7,8 @@ Two variants that bypass the depth-map pipeline entirely:
   (SHARP works at 1536^2).
 - ``sharp_detail``: same geometry, but colour is re-sampled from the
   original photo wherever the original camera could see that surface
-  (~99% of pixels); splat colour only in the disoccluded band.
+  (~95% of pixels); splat colour only in the disoccluded band.
+- ``sharp_hires``: sharp_detail with SHARP run at 2688^2 (1344^2 grid).
 
 SHARP weights are research-only (Apple ML Research license). These
 methods are opt-in and clearly labelled non-commercial.
@@ -35,6 +36,7 @@ class _SharpBase(BaseStereoMethod):
 
     needs_depth: ClassVar[bool] = False
     _detail_transfer: ClassVar[bool] = False
+    _internal: ClassVar[int] = 1536  # SHARP internal size, see sharp_predict.predict_gaussians
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {}
 
@@ -60,7 +62,7 @@ class _SharpBase(BaseStereoMethod):
         from pystereo_core.stereo.sharp_predict import predict_gaussians
         from pystereo_core.stereo.splat_render import render_stereo
 
-        npz_path = predict_gaussians(image)
+        npz_path = predict_gaussians(image, internal=self._internal)
 
         subject_mask: np.ndarray | None = None
         if fg_mask is not None:
@@ -112,6 +114,20 @@ class SharpDetailMethod(_SharpBase):
         "same 3D geometry. Research-only license."
     )
     _detail_transfer: ClassVar[bool] = True
+
+
+class SharpHiresMethod(_SharpBase):
+    name: ClassVar[str] = "sharp_hires"
+    label: ClassVar[str] = "SHARP Hi-res Detail"
+    description: ClassVar[str] = (
+        "sharp_detail with SHARP run at 2688^2 instead of 1536^2 (1344^2 "
+        "Gaussian grid, 3.6 M Gaussians): tighter silhouettes and a visibly "
+        "sharper disocclusion band. ~5x slower prediction (about 95 s on an "
+        "M-series Mac), 3x memory. Experimental - outside the model's "
+        "training resolution. Research-only license."
+    )
+    _detail_transfer: ClassVar[bool] = True
+    _internal: ClassVar[int] = 2688
 
 
 class SharpDepthMethod(_SharpBase):

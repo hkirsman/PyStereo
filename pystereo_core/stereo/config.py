@@ -7,7 +7,7 @@ from dataclasses import dataclass, fields, replace
 from typing import Any, Literal
 
 InpaintBackendName = Literal["lama", "opencv", "none", "flux", "aotgan"]
-StereoMethodName = Literal["per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill", "sharp_splat", "sharp_detail", "sharp_depth", "sharp_mesh", "sharp_taichi"]
+StereoMethodName = Literal["per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill", "sharp_splat", "sharp_detail", "sharp_hires", "sharp_depth", "sharp_mesh", "sharp_taichi"]
 DepthModelSize = Literal["small", "base", "large"]
 
 DEFAULT_METHOD: StereoMethodName = "per_eye_inpaint"
@@ -71,7 +71,7 @@ class StereoSettings:
         """
         method_raw = method or os.environ.get("PYSTEREO_METHOD", "").strip().lower()
         stereo_method: StereoMethodName = DEFAULT_METHOD
-        if method_raw in ("per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill", "sharp_splat", "sharp_detail", "sharp_depth", "sharp_mesh", "sharp_taichi"):
+        if method_raw in ("per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill", "sharp_splat", "sharp_detail", "sharp_hires", "sharp_depth", "sharp_mesh", "sharp_taichi"):
             stereo_method = method_raw  # type: ignore[assignment]
 
         backend_raw = os.environ.get("PYSTEREO_INPAINT", "lama").strip().lower()

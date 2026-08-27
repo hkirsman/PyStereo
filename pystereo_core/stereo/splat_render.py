@@ -162,7 +162,9 @@ def composite_ewa_torch(p: _Projected) -> tuple[np.ndarray, np.ndarray, np.ndarr
         ok, w, idx = contributions(dx, dy)
         sel = ok & (w > SOFT_T)
         idx_s, w_s = idx[sel], w[sel]
-        front = p.z[sel] <= zbuf[idx_s] * (1 + DEPTH_TOL)
+        # Two-sided: Gaussians in front of the z-buffered surface (weak tails
+        # of a foreground object) must not bleed into background pixels.
+        front = (p.z[sel] - zbuf[idx_s]).abs() <= zbuf[idx_s] * DEPTH_TOL
         idx_s, w_s = idx_s[front], w_s[front]
         acc.index_add_(0, idx_s, p.col[sel][front] * w_s[:, None])
         wsum.index_add_(0, idx_s, w_s)
@@ -183,13 +185,20 @@ def detail_transfer(
     eye_x: float,
     cx_shift: float,
     tol: float = 0.03,
+    edge_px: int = 3,
+    edge_jump: float = 0.15,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Re-sample the original photo through the eye view's rendered depth.
 
     Each eye pixel + depth is a 3D point; project it into the original camera
-    and take the photo's colour there, unless that point is hidden in the
-    original (its depth is behind the centre view's surface) - then keep the
-    splat render's colour. Returns (rgb uint8, mask of splat-filled pixels).
+    and take the photo's colour there, unless the photo pixel there is not the
+    surface this eye sees: (a) it is hidden behind something in the original
+    (real disocclusion, ``tol``), or (b) a surface at least ``edge_jump``
+    nearer lies within ``edge_px`` of it. SHARP's depth silhouette sits 1-2 px
+    inside the photo's real silhouette, so without (b) those photo pixels
+    carry the subject's anti-aliased edge and draw a dark outline into the
+    background. In both cases keep the splat render's colour.
+    Returns (rgb uint8, mask of splat-filled pixels).
     """
     H, W = eye_depth.shape
     cx0, cy = (W - 1) / 2, (H - 1) / 2
@@ -201,12 +210,20 @@ def detail_transfer(
     u0 = (f * x / z + cx0).astype(np.float32)
     v0 = (f * y / z + cy).astype(np.float32)
     sampled = cv2.remap(photo, u0, v0, cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
-    d0 = cv2.remap(
-        np.nan_to_num(centre_depth, nan=1e9).astype(np.float32),
-        u0, v0, cv2.INTER_NEAREST,
-        borderMode=cv2.BORDER_CONSTANT, borderValue=1e9,
-    )
-    occluded = z > d0 * (1 + tol)
+    d0n = np.nan_to_num(centre_depth, nan=1e9).astype(np.float32)
+
+    def _sample(a: np.ndarray) -> np.ndarray:
+        return cv2.remap(
+            a, u0, v0, cv2.INTER_NEAREST,
+            borderMode=cv2.BORDER_CONSTANT, borderValue=1e9,
+        )
+
+    # 3x3 max: the eye and centre depth edges differ by ~1 px, which would
+    # otherwise flag a ring around every silhouette.
+    d0max = _sample(cv2.dilate(d0n, np.ones((3, 3), np.uint8)))
+    k = np.ones((2 * edge_px + 1,) * 2, np.uint8)
+    d0min = _sample(cv2.erode(d0n, k))
+    occluded = (z > d0max * (1 + tol)) | (z > d0min * (1 + edge_jump))
     outside = (u0 < 0) | (u0 > W - 1) | (v0 < 0) | (v0 > H - 1)
     use_splat = occluded | outside
     use_splat = cv2.morphologyEx(

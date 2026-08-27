@@ -144,7 +144,7 @@ def composite_ewa_taichi(
                     w = o * ti.exp(-0.5 * q)
                     if w > soft_t:
                         flat = py * W_ + px
-                        if d <= zbuf_in[flat] * (1.0 + depth_tol):
+                        if ti.abs(d - zbuf_in[flat]) <= zbuf_in[flat] * depth_tol:
                             ti.atomic_add(wsum_out[flat], w)
                             ti.atomic_add(acc_out[flat, 0], w * r)
                             ti.atomic_add(acc_out[flat, 1], w * g)
