@@ -246,7 +246,7 @@ def predict_gaussians(
 
     # Write to a temp file and rename so an interrupted run (killed request,
     # app restart) never leaves a truncated archive behind as a cache hit.
-    tmp = out.with_suffix(".npz.tmp")
+    tmp = out.with_name(out.stem + ".tmp.npz")   # savez appends .npz unless the name already ends with it
     np.savez_compressed(
         tmp,
         means=g.mean_vectors[0].cpu().numpy(),
