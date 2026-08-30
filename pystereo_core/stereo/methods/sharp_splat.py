@@ -62,6 +62,7 @@ class _SharpBase(BaseStereoMethod):
         image: Image.Image,
         fg_mask: np.ndarray | None,
         settings: StereoSettings,
+        intermediates: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         from pystereo_core.stereo.sharp_predict import predict_gaussians
         from pystereo_core.stereo.splat_render import render_stereo
@@ -84,6 +85,12 @@ class _SharpBase(BaseStereoMethod):
             photo=photo,
             mode=self._render_mode,
         )
+
+        if intermediates is not None:
+            if "center_rgb" in result:
+                intermediates["splat_rgb"] = result["center_rgb"]
+            if "depth01" in result:
+                intermediates["depth01"] = result["depth01"]
 
         notes = result.get("notes", {})
         logger.info(

@@ -295,6 +295,25 @@ def _artifact_deletable_path(spec: ArtifactSpec) -> Path | None:
     return None
 
 
+def _delete_url_partial(spec: ArtifactSpec) -> int:
+    """Remove a ``.partial`` download file for a URL artifact, if present."""
+    if spec.kind != "url" or not spec.url:
+        return 0
+    path = _safe_url_cache_file(spec.url)
+    if path is None:
+        return 0
+    partial = path.with_suffix(path.suffix + ".partial")
+    try:
+        if partial.is_file() and partial.parent == path.parent:
+            size = partial.stat().st_size
+            partial.unlink()
+            logger.info("Deleted partial %s (%s bytes)", partial, size)
+            return size
+    except OSError as exc:
+        logger.warning("Failed to delete partial %s: %s", partial, exc)
+    return 0
+
+
 def _delete_artifact(spec: ArtifactSpec) -> tuple[int, str | None]:
     """Delete one pack artifact from disk.
 
@@ -445,6 +464,10 @@ def _make_progress_tqdm(
     return _ProgressTqdm
 
 
+class _DownloadCancelled(Exception):
+    """Raised inside a download thread when the user cancels."""
+
+
 @dataclass
 class _ArtifactRuntime:
     # absent | queued | downloading | ready | error
@@ -472,6 +495,7 @@ class ModelDownloadManager:
     _job_bytes_done: int = field(default=0, init=False)
     _job_bytes_total: int = field(default=0, init=False)
     _file_reported: int = field(default=0, init=False)
+    _cancel_requested: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         for spec in STEREO_PACK:
@@ -645,12 +669,13 @@ class ModelDownloadManager:
             art_id = SHARP_SPEC.id
             if art_id not in self._artifacts:
                 self._artifacts[art_id] = _ArtifactRuntime()
+            self._cancel_requested = False
             self._error = None
             self._message = f"Downloading {SHARP_SPEC.name}..."
             size = _FALLBACK_BYTES.get(art_id, 0)
             self._file_reported = 0
             art = self._artifacts[art_id]
-            art.state = "queued"
+            art.state = "downloading"
             art.percent = 0
             art.error = None
             art.bytes_total = size
@@ -664,12 +689,37 @@ class ModelDownloadManager:
             self._thread.start()
         return True
 
+    def cancel_sharp_download(self) -> dict[str, Any]:
+        """Request cancellation of an in-progress SHARP download.
+
+        The download thread stops at the next chunk boundary, drops the
+        ``.partial`` file, and resets artifact state to absent.
+        """
+        with self._lock:
+            art = self._artifacts.get(SHARP_SPEC.id)
+            alive = self._thread is not None and self._thread.is_alive()
+            downloading = art is not None and art.state in ("queued", "downloading")
+            if not alive and not downloading:
+                return {"cancelled": False, "reason": "not_downloading"}
+            self._cancel_requested = True
+            self._message = "Cancelling SHARP download..."
+            if art is not None:
+                art.state = "absent"
+                art.percent = 0
+                art.bytes_downloaded = 0
+                art.error = None
+        return {"cancelled": True}
+
     def delete_sharp_model(self) -> dict[str, Any]:
-        """Remove the SHARP checkpoint from disk."""
+        """Remove the SHARP checkpoint (and any partial) from disk."""
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 raise RuntimeError("Cannot delete while a download is in progress")
+            art = self._artifacts.get(SHARP_SPEC.id)
+            if art is not None and art.state in ("queued", "downloading"):
+                raise RuntimeError("Cannot delete while a download is in progress")
         bytes_removed, path = _delete_artifact(SHARP_SPEC)
+        bytes_removed += _delete_url_partial(SHARP_SPEC)
         with self._lock:
             art = self._artifacts.get(SHARP_SPEC.id)
             if art:
@@ -682,6 +732,9 @@ class ModelDownloadManager:
     def _run_single_download(self, spec: ArtifactSpec) -> None:
         """Download a single artifact (used for optional models)."""
         try:
+            with self._lock:
+                if self._cancel_requested:
+                    raise _DownloadCancelled()
             if _artifact_is_local(spec):
                 with self._lock:
                     art = self._artifacts.get(spec.id)
@@ -690,6 +743,8 @@ class ModelDownloadManager:
                         art.percent = 100
             else:
                 with self._lock:
+                    if self._cancel_requested:
+                        raise _DownloadCancelled()
                     self._message = f"Downloading {spec.name}..."
                     art = self._artifacts.get(spec.id)
                     if art:
@@ -700,6 +755,9 @@ class ModelDownloadManager:
                     self._download_hf(spec)
                 elif spec.kind == "url" and spec.url:
                     self._download_url(spec)
+                with self._lock:
+                    if self._cancel_requested:
+                        raise _DownloadCancelled()
                 measured = _measure_local_bytes(spec)
                 with self._lock:
                     if measured > 0:
@@ -713,11 +771,28 @@ class ModelDownloadManager:
             with self._lock:
                 self._message = f"{spec.name} ready"
                 self._error = None
+                self._cancel_requested = False
             self.refresh_local_state()
             logger.info("Downloaded %s", spec.name)
+        except _DownloadCancelled:
+            logger.info("Download of %s cancelled", spec.name)
+            if spec.kind == "url":
+                _delete_url_partial(spec)
+            with self._lock:
+                self._cancel_requested = False
+                self._error = None
+                self._message = f"{spec.name} download cancelled"
+                art = self._artifacts.get(spec.id)
+                if art:
+                    art.state = "absent"
+                    art.percent = 0
+                    art.bytes_downloaded = 0
+                    art.error = None
+            self.refresh_local_state()
         except Exception as exc:
             logger.exception("Download of %s failed", spec.name)
             with self._lock:
+                self._cancel_requested = False
                 self._error = str(exc)
                 self._message = f"Download failed: {exc}"
                 art = self._artifacts.get(spec.id)
@@ -1014,6 +1089,9 @@ class ModelDownloadManager:
             downloaded = 0
             with open(tmp, "wb") as out:
                 while True:
+                    with self._lock:
+                        if self._cancel_requested:
+                            raise _DownloadCancelled()
                     chunk = resp.read(1024 * 256)
                     if not chunk:
                         break
@@ -1022,6 +1100,9 @@ class ModelDownloadManager:
                     self._on_file_progress(
                         spec.id, float(downloaded), float(total), spec.name
                     )
+        with self._lock:
+            if self._cancel_requested:
+                raise _DownloadCancelled()
         tmp.replace(dest)
         self._on_file_done(spec.id, float(total))
 

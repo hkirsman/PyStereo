@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PyStereo</title>
-    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/style.css?v={{version}}" />
   </head>
   <body class="model-gate-active">
     <div id="modelBanner" class="model-banner" role="status" aria-live="polite" hidden>
@@ -39,7 +39,7 @@
 
       <header class="page-header">
         <h1 class="title">PyStereo</h1>
-        <p class="subtitle">Convert 2D photos to side-by-side stereo using AI depth estimation.</p>
+        <p class="subtitle">Convert 2D photos to side-by-side stereo using AI depth estimation. <span class="version">v{{version}}</span></p>
       </header>
 
       <main class="layout">
@@ -76,6 +76,16 @@
             </select>
           </div>
 
+          <div class="settings-row sharp-banner" id="sharpBanner" hidden>
+            <span class="settings-label"></span>
+            <span class="sharp-banner-text"><a href="https://apple.github.io/ml-sharp/" target="_blank" rel="noopener">SHARP</a> checkpoint required (2.8 GB, research-only).</span>
+            <div class="sharp-banner-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="btnDownloadSharp">Download SHARP</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnCancelSharp" hidden title="Stop the SHARP download.">Cancel</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRemoveSharp" hidden>Remove</button>
+            </div>
+          </div>
+
           <div class="settings-row">
             <span class="settings-label">Max dim</span>
             <div class="settings-slider-wrap">
@@ -109,9 +119,13 @@
               <p class="stage-label">Original</p>
               <img id="stageOriginalImg" class="stage-img" alt="Original input" />
             </div>
+            <div class="stage-card" id="stageSplat" hidden>
+              <p class="stage-label">Splat Render</p>
+              <img id="stageSplatImg" class="stage-img" alt="SHARP Gaussian splat center view" />
+            </div>
             <div class="stage-card" id="stageDepth" hidden>
-              <p class="stage-label">Depth Map (raw)</p>
-              <img id="stageDepthImg" class="stage-img" alt="Estimated depth map" />
+              <p class="stage-label">Depth Map</p>
+              <img id="stageDepthImg" class="stage-img" alt="Depth map" />
             </div>
             <div class="stage-card" id="stageWarp" hidden>
               <p class="stage-label">Warp (pre-inpaint)</p>
@@ -127,6 +141,6 @@
       </main>
     </div>
 
-    <script type="module" src="/main.js"></script>
+    <script type="module" src="/main.js?v={{version}}"></script>
   </body>
 </html>

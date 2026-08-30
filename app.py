@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from flask import Flask, Response, jsonify, request, send_file, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file
 from PIL import Image
 
 # ---------------------------------------------------------------------------
@@ -218,6 +218,17 @@ app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
 
 
+@app.after_request
+def _no_cache_dynamic(response: Response) -> Response:
+    if (
+        request.path == "/"
+        or request.path.startswith("/api/")
+        or request.path.endswith((".js", ".css", ".html"))
+    ):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.errorhandler(413)
 def request_entity_too_large(_e: Exception) -> Any:
     return jsonify({"error": "File too large"}), 413
@@ -240,6 +251,31 @@ def _model_status_payload() -> dict[str, Any]:
     from pystereo_core.download import get_download_manager
 
     return get_download_manager().status_dict()
+
+
+def _attach_sharp_status(payload: dict[str, Any]) -> dict[str, Any]:
+    """Add SHARP checkpoint fields expected by the web UI."""
+    from pystereo_core.download import get_download_manager
+
+    mgr = get_download_manager()
+    ready = mgr.is_sharp_model_local()
+    payload["sharp_ready"] = ready
+    sharp_art = mgr._artifacts.get("sharp")
+    downloading = (
+        not ready
+        and sharp_art is not None
+        and sharp_art.state in ("queued", "downloading")
+    )
+    payload["sharp_downloading"] = downloading
+    if downloading and sharp_art is not None:
+        payload["sharp_percent"] = int(sharp_art.percent or 0)
+        payload["sharp_bytes_downloaded"] = int(sharp_art.bytes_downloaded or 0)
+        payload["sharp_bytes_total"] = int(sharp_art.bytes_total or 0)
+    else:
+        payload["sharp_percent"] = 100 if ready else 0
+        payload["sharp_bytes_downloaded"] = 0
+        payload["sharp_bytes_total"] = 0
+    return payload
 
 
 def _model_not_ready_response() -> tuple[Any, int]:
@@ -275,7 +311,11 @@ def favicon() -> Any:
 
 @app.route("/")
 def index() -> Any:
-    return send_from_directory(str(STATIC_DIR), "index.html")
+    from pystereo_core._version import __version__ as VERSION
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    html = html.replace("{{version}}", VERSION)
+    return Response(html, mimetype="text/html")
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +364,45 @@ def api_health() -> Any:
 
 @app.route("/api/model/status", methods=["GET"])
 def api_model_status() -> Any:
-    return jsonify(_model_status_payload())
+    return jsonify(_attach_sharp_status(_model_status_payload()))
+
+
+@app.route("/api/model/download-sharp", methods=["POST"])
+def api_model_download_sharp() -> Any:
+    """Start a background download of the SHARP checkpoint."""
+    from pystereo_core.download import get_download_manager
+
+    mgr = get_download_manager()
+    mgr.ensure_sharp_model_async()
+    return jsonify(_attach_sharp_status(mgr.status_dict()))
+
+
+@app.route("/api/model/cancel-sharp", methods=["POST"])
+def api_model_cancel_sharp() -> Any:
+    """Cancel an in-progress SHARP checkpoint download."""
+    from pystereo_core.download import get_download_manager
+
+    mgr = get_download_manager()
+    result = mgr.cancel_sharp_download()
+    payload = _attach_sharp_status(mgr.status_dict())
+    payload["cancelled"] = result.get("cancelled", False)
+    return jsonify(payload)
+
+
+@app.route("/api/model/delete-sharp", methods=["POST"])
+def api_model_delete_sharp() -> Any:
+    """Delete the cached SHARP checkpoint to free disk space."""
+    from pystereo_core.download import get_download_manager
+
+    mgr = get_download_manager()
+    try:
+        result = mgr.delete_sharp_model()
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    payload = _attach_sharp_status(mgr.status_dict())
+    payload["deleted_bytes"] = result.get("deleted_bytes", 0)
+    payload["path"] = result.get("path")
+    return jsonify(payload)
 
 
 @app.route("/api/model/download", methods=["POST"])
@@ -645,9 +723,11 @@ def api_generate() -> Any:
                 active_pipeline = pipeline
 
             warp_result = None
+            sharp_intermediates: dict[str, Any] = {}
             if not gen_needs_depth:
                 sbs_img = active_pipeline.synthesize_with_depth_estimator(
                     rgb_pil, None, method=method_override,
+                    intermediates=sharp_intermediates,
                 )
             else:
                 depth_estimator = _get_depth_estimator()
@@ -686,6 +766,21 @@ def api_generate() -> Any:
                 )
             sbs_img.save(str(result_dir / "sbs.jpg"), quality=95)
 
+            if sharp_intermediates.get("splat_rgb") is not None:
+                Image.fromarray(sharp_intermediates["splat_rgb"]).save(
+                    str(result_dir / "splat.jpg"), quality=95,
+                )
+            if sharp_intermediates.get("depth01") is not None:
+                import numpy as np
+
+                d01 = sharp_intermediates["depth01"]
+                d_u8 = (d01 * 255).clip(0, 255).astype(np.uint8)
+                Image.fromarray(d_u8, mode="L").save(str(result_dir / "depth.png"))
+
+    except FileNotFoundError as exc:
+        LOGGER.exception("Model not found for %s", upload.filename)
+        shutil.rmtree(result_dir, ignore_errors=True)
+        return jsonify({"error": str(exc)}), 503
     except Exception:
         LOGGER.exception("Inference failed for %s", upload.filename)
         shutil.rmtree(result_dir, ignore_errors=True)
@@ -718,6 +813,11 @@ def api_generate() -> Any:
         if warp_result is not None:
             resp["warp_url"] = f"/api/results/{result_id}/warp.jpg"
             resp["mask_url"] = f"/api/results/{result_id}/mask.png"
+    else:
+        if sharp_intermediates.get("splat_rgb") is not None:
+            resp["splat_url"] = f"/api/results/{result_id}/splat.jpg"
+        if sharp_intermediates.get("depth01") is not None:
+            resp["depth_url"] = f"/api/results/{result_id}/depth.png"
     return jsonify(resp)
 
 

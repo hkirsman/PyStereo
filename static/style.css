@@ -190,6 +190,10 @@ body.model-gate-active .app-shell > .layout {
   font-weight: 400;
 }
 
+.version {
+  opacity: 0.5;
+}
+
 /* ----- Two-panel layout ----- */
 
 .layout {
@@ -402,6 +406,29 @@ body.model-gate-active .app-shell > .layout {
 .btn-banner:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.sharp-banner-text {
+  flex: 1;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.sharp-banner-text a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.sharp-banner-text a:hover {
+  text-decoration: underline;
+}
+
+.sharp-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 /* ----- Status bar ----- */

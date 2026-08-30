@@ -39,6 +39,23 @@ def _quat_to_rot(q: torch.Tensor) -> torch.Tensor:
     ], dim=-1).reshape(-1, 3, 3)
 
 
+def _depth_to_01(depth: np.ndarray) -> np.ndarray:
+    """Normalise a metric depth buffer to [0, 1] via inverse depth.
+
+    Handles NaN (holes) and zero/negative depth (invalid) by mapping them
+    to the farthest valid distance.
+    """
+    valid = np.isfinite(depth) & (depth > 0)
+    if not valid.any():
+        return np.zeros_like(depth, dtype=np.float32)
+    inv = np.zeros_like(depth)
+    inv[valid] = 1.0 / depth[valid]
+    far = float(inv[valid].min())
+    inv[~valid] = far
+    lo, hi = far, float(inv[valid].max())
+    return ((inv - lo) / max(hi - lo, 1e-6)).astype(np.float32)
+
+
 def linear_to_srgb(x: np.ndarray) -> np.ndarray:
     x = np.clip(x, 0, 1)
     return np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(x, 1 / 2.4) - 0.055)
@@ -386,7 +403,7 @@ def render_stereo(
     scene = SharpScene(npz_path)
     f = scene.f_px
 
-    _, d0, _ = scene.render(0.0, 0.0, mode=mode)
+    c_rgb, d0, _ = scene.render(0.0, 0.0, mode=mode)
     if converge_m is None:
         if subject_mask is not None and subject_mask.any():
             converge_m = float(np.nanmedian(d0[subject_mask]))
@@ -414,13 +431,13 @@ def render_stereo(
         right, r_h = detail_transfer(
             photo, r_rgb, r_d, d0, f, +baseline_m / 2, +shift,
         )
-        inv = 1.0 / np.nan_to_num(l_d, nan=np.nanmax(l_d))
-        depth01 = (inv - inv.min()) / max(inv.max() - inv.min(), 1e-6)
+        depth01 = _depth_to_01(l_d)
         zn = float(np.nanpercentile(l_d, 1))
         zf = float(np.nanpercentile(l_d, 99))
         return {
             "left": left,
             "right": right,
+            "center_rgb": (linear_to_srgb(c_rgb) * 255).astype(np.uint8),
             "depth01": depth01.astype(np.float32),
             "holes": l_h | r_h,
             "notes": {
@@ -434,13 +451,13 @@ def render_stereo(
             },
         }
 
-    inv = 1.0 / np.nan_to_num(l_d, nan=np.nanmax(l_d))
-    depth01 = (inv - inv.min()) / max(inv.max() - inv.min(), 1e-6)
+    depth01 = _depth_to_01(l_d)
     zn = float(np.nanpercentile(l_d, 1))
     zf = float(np.nanpercentile(l_d, 99))
     return {
         "left": finish(l_rgb, l_h),
         "right": finish(r_rgb, r_h),
+        "center_rgb": (linear_to_srgb(c_rgb) * 255).astype(np.uint8),
         "depth01": depth01.astype(np.float32),
         "holes": l_h | r_h,
         "notes": {

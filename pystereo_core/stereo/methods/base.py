@@ -76,6 +76,7 @@ class BaseStereoMethod(ABC):
         image: Image.Image,
         fg_mask: np.ndarray | None,
         settings: StereoSettings,
+        intermediates: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Produce stereo eyes without external depth estimation.
 
@@ -90,6 +91,9 @@ class BaseStereoMethod(ABC):
             ``(H, W)`` float32 in ``[0, 1]`` from BiRefNet, or ``None``.
         settings:
             Current stereo settings.
+        intermediates:
+            If not ``None``, the method may populate this dict with
+            intermediate artifacts (e.g. ``splat_rgb``, ``depth01``).
 
         Returns
         -------

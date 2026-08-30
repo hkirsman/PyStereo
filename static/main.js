@@ -22,6 +22,11 @@ const previewImg = $("#previewImg");
 const depthModelSelect = $("#depthModelSelect");
 const btnDownloadDepth = $("#btnDownloadDepth");
 const methodSelect = $("#methodSelect");
+const sharpBanner = $("#sharpBanner");
+const sharpBannerText = $(".sharp-banner-text");
+const btnDownloadSharp = $("#btnDownloadSharp");
+const btnCancelSharp = $("#btnCancelSharp");
+const btnRemoveSharp = $("#btnRemoveSharp");
 const maxDimSlider = $("#maxDimSlider");
 const maxDimValue = $("#maxDimValue");
 const btnGenerate = $("#btnGenerate");
@@ -32,6 +37,8 @@ const pipelinePlaceholder = $("#pipelinePlaceholder");
 const pipelineStages = $("#pipelineStages");
 const stageOriginal = $("#stageOriginal");
 const stageOriginalImg = $("#stageOriginalImg");
+const stageSplat = $("#stageSplat");
+const stageSplatImg = $("#stageSplatImg");
 const stageDepth = $("#stageDepth");
 const stageDepthImg = $("#stageDepthImg");
 const stageWarp = $("#stageWarp");
@@ -46,6 +53,11 @@ let selectedFile = null;
 let previewObjectUrl = null;
 let stageOriginalObjectUrl = null;
 let modelReady = false;
+let sharpReady = false;
+let sharpDownloading = false;
+let sharpPercent = 0;
+/** Ignore stale sharp_downloading:false until this timestamp (ms). */
+let sharpDownloadGraceUntil = 0;
 let generating = false;
 let pollTimer = null;
 let depthModelStatus = {};
@@ -79,6 +91,7 @@ function applyModelStatus(data) {
 
   const state = data.state || "idle";
   modelReady = state === "ready";
+  applySharpStatus(data);
 
   if (state === "ready") {
     modelBanner.classList.add("is-ready");
@@ -87,7 +100,6 @@ function applyModelStatus(data) {
     btnModelDownload.hidden = true;
     btnModelCancel.hidden = true;
     btnModelRemove.hidden = false;
-    unlockGate();
   } else if (state === "downloading") {
     modelBanner.classList.add("is-downloading");
     modelBannerMsg.textContent = data.message || "Downloading AI models...";
@@ -102,9 +114,6 @@ function applyModelStatus(data) {
     btnModelCancel.hidden = false;
     btnModelCancel.disabled = false;
     btnModelRemove.hidden = true;
-    if (selectedMethodNeedsDepth()) {
-      lockGate("Download in progress - workspace unlocks when it finishes.");
-    }
   } else if (state === "error") {
     modelBanner.classList.add("is-error");
     modelBannerMsg.textContent = data.error
@@ -116,9 +125,6 @@ function applyModelStatus(data) {
     btnModelDownload.disabled = false;
     btnModelCancel.hidden = true;
     btnModelRemove.hidden = true;
-    if (selectedMethodNeedsDepth()) {
-      lockGate("Download failed. Use Retry in the banner above.");
-    }
   } else {
     modelBannerMsg.textContent =
       "Download the AI stereo models to generate side-by-side images.";
@@ -128,12 +134,36 @@ function applyModelStatus(data) {
     btnModelDownload.disabled = false;
     btnModelCancel.hidden = true;
     btnModelRemove.hidden = true;
-    if (selectedMethodNeedsDepth()) {
-      lockGate("Download AI models using the banner above to get started.");
-    }
   }
 
+  syncModelGate(state);
+  updateSharpBanner();
   updateGenerateBtn();
+}
+
+/** Merge server SHARP fields without letting a stale poll undo a just-started download. */
+function applySharpStatus(data) {
+  if (!data) return;
+  if (data.sharp_ready) {
+    sharpReady = true;
+    sharpDownloading = false;
+    sharpPercent = 100;
+    sharpDownloadGraceUntil = 0;
+    return;
+  }
+  sharpReady = false;
+  if (data.sharp_downloading) {
+    sharpDownloading = true;
+    sharpPercent = data.sharp_percent || 0;
+    sharpDownloadGraceUntil = Date.now() + 8000;
+    return;
+  }
+  if (Date.now() < sharpDownloadGraceUntil) {
+    // Keep optimistic / in-flight downloading UI; wait for the next poll.
+    return;
+  }
+  sharpDownloading = false;
+  sharpPercent = 0;
 }
 
 function lockGate(hint) {
@@ -149,6 +179,21 @@ function unlockGate() {
   modelGateOverlay.setAttribute("aria-hidden", "true");
 }
 
+/** Unlock for SHARP-only methods; lock depth methods until the pack is ready. */
+function syncModelGate(state) {
+  if (!selectedMethodNeedsDepth() || modelReady) {
+    unlockGate();
+    return;
+  }
+  if (state === "downloading") {
+    lockGate("Download in progress - workspace unlocks when it finishes.");
+  } else if (state === "error") {
+    lockGate("Download failed. Use Retry in the banner above.");
+  } else {
+    lockGate("Download AI models using the banner above to get started.");
+  }
+}
+
 async function pollModelStatus() {
   try {
     const res = await fetch("/api/model/status");
@@ -156,8 +201,11 @@ async function pollModelStatus() {
     const data = await res.json();
     applyModelStatus(data);
 
-    if (data.state === "downloading") {
+    if (data.state === "downloading" || data.sharp_downloading || sharpDownloading) {
       schedulePoll(1500);
+    } else if (selectedMethodNeedsSharp() && !sharpReady) {
+      // SHARP still missing - poll often so a background download is noticed.
+      schedulePoll(2000);
     } else {
       schedulePoll(10000);
     }
@@ -378,12 +426,12 @@ depthModelSelect.addEventListener("change", () => {
 
 methodSelect.addEventListener("change", () => {
   updateGenerateBtn();
-  if (!selectedMethodNeedsDepth()) {
-    unlockGate();
-  } else if (!modelReady) {
-    lockGate("Download AI models using the banner above to get started.");
-  }
+  syncModelGate(modelReady ? "ready" : "idle");
+  updateSharpBanner();
   saveSettings();
+  if (selectedMethodNeedsSharp() && !sharpReady) {
+    schedulePoll(500);
+  }
 });
 
 function selectedMethodNeedsDepth() {
@@ -391,6 +439,124 @@ function selectedMethodNeedsDepth() {
   if (!(method in methodMeta)) return true;
   return methodMeta[method].needs_depth;
 }
+
+function selectedMethodNeedsSharp() {
+  const method = methodSelect.value || defaultMethodName;
+  if (!(method in methodMeta)) return false;
+  return !methodMeta[method].needs_depth;
+}
+
+function updateSharpBanner() {
+  if (!selectedMethodNeedsSharp()) {
+    sharpBanner.hidden = true;
+    return;
+  }
+  sharpBanner.hidden = false;
+  if (sharpReady) {
+    sharpBannerText.innerHTML =
+      '<a href="https://apple.github.io/ml-sharp/" target="_blank" rel="noopener">SHARP</a> checkpoint ready.';
+    btnDownloadSharp.hidden = true;
+    btnCancelSharp.hidden = true;
+    btnRemoveSharp.hidden = false;
+    btnRemoveSharp.disabled = false;
+    return;
+  }
+  if (sharpDownloading) {
+    const pct = sharpPercent || 0;
+    sharpBannerText.innerHTML =
+      'Downloading <a href="https://apple.github.io/ml-sharp/" target="_blank" rel="noopener">SHARP</a> checkpoint... ' + pct + "%";
+    btnDownloadSharp.hidden = true;
+    btnCancelSharp.hidden = false;
+    btnCancelSharp.disabled = false;
+    btnRemoveSharp.hidden = true;
+    return;
+  }
+  sharpBannerText.innerHTML =
+    '<a href="https://apple.github.io/ml-sharp/" target="_blank" rel="noopener">SHARP</a> checkpoint required (2.8 GB, research-only).';
+  btnDownloadSharp.hidden = false;
+  btnDownloadSharp.disabled = false;
+  btnDownloadSharp.textContent = "Download SHARP";
+  btnCancelSharp.hidden = true;
+  btnRemoveSharp.hidden = true;
+}
+
+btnDownloadSharp.addEventListener("click", async () => {
+  // Optimistic UI - do not leave the button idle waiting on POST / stale polls.
+  sharpDownloading = true;
+  sharpPercent = sharpPercent || 0;
+  sharpDownloadGraceUntil = Date.now() + 8000;
+  updateSharpBanner();
+  updateGenerateBtn();
+  schedulePoll(1000);
+  try {
+    const res = await fetch("/api/model/download-sharp", { method: "POST" });
+    if (!res.ok) {
+      let msg = `Server error (${res.status})`;
+      try { msg = (await res.json()).error || msg; } catch {}
+      sharpDownloadGraceUntil = 0;
+      sharpDownloading = false;
+      updateSharpBanner();
+      btnDownloadSharp.textContent = "Retry";
+      btnDownloadSharp.disabled = false;
+      setStatus(msg, false, true);
+      return;
+    }
+    const data = await res.json();
+    applyModelStatus(data);
+    schedulePoll(1500);
+  } catch {
+    sharpDownloadGraceUntil = 0;
+    sharpDownloading = false;
+    updateSharpBanner();
+    btnDownloadSharp.textContent = "Retry";
+    btnDownloadSharp.disabled = false;
+  }
+});
+
+btnCancelSharp.addEventListener("click", async () => {
+  btnCancelSharp.disabled = true;
+  sharpDownloadGraceUntil = 0;
+  try {
+    const res = await fetch("/api/model/cancel-sharp", { method: "POST" });
+    if (!res.ok) {
+      let msg = `Server error (${res.status})`;
+      try { msg = (await res.json()).error || msg; } catch {}
+      btnCancelSharp.disabled = false;
+      setStatus(msg, false, true);
+      return;
+    }
+    const data = await res.json();
+    sharpDownloading = false;
+    sharpPercent = 0;
+    applyModelStatus(data);
+    schedulePoll(2000);
+  } catch {
+    btnCancelSharp.disabled = false;
+  }
+});
+
+btnRemoveSharp.addEventListener("click", async () => {
+  if (!confirm("Delete the SHARP checkpoint (2.8 GB)? You can re-download later.")) return;
+  btnRemoveSharp.disabled = true;
+  try {
+    const res = await fetch("/api/model/delete-sharp", { method: "POST" });
+    if (!res.ok) {
+      let msg = `Server error (${res.status})`;
+      try { msg = (await res.json()).error || msg; } catch {}
+      btnRemoveSharp.disabled = false;
+      setStatus(msg, false, true);
+      return;
+    }
+    const data = await res.json();
+    sharpReady = false;
+    sharpDownloading = false;
+    sharpPercent = 0;
+    applyModelStatus(data);
+    schedulePoll(2000);
+  } catch {
+    btnRemoveSharp.disabled = false;
+  }
+});
 
 async function loadMethods() {
   try {
@@ -416,7 +582,8 @@ async function loadMethods() {
 
 function updateGenerateBtn() {
   const needsModel = selectedMethodNeedsDepth();
-  btnGenerate.disabled = !selectedFile || (needsModel && !modelReady) || generating;
+  const needsSharp = selectedMethodNeedsSharp();
+  btnGenerate.disabled = !selectedFile || (needsModel && !modelReady) || (needsSharp && !sharpReady) || generating;
 }
 
 function setStatus(text, busy, isError) {
@@ -446,6 +613,7 @@ btnGenerate.addEventListener("click", async () => {
   if (stageOriginalObjectUrl) URL.revokeObjectURL(stageOriginalObjectUrl);
   stageOriginalObjectUrl = URL.createObjectURL(selectedFile);
   stageOriginalImg.src = stageOriginalObjectUrl;
+  stageSplat.hidden = true;
   stageDepth.hidden = true;
   stageWarp.hidden = true;
   stageSbs.hidden = true;
@@ -475,6 +643,12 @@ btnGenerate.addEventListener("click", async () => {
     }
 
     const data = await res.json();
+
+    // Show splat render (SHARP methods)
+    if (data.splat_url) {
+      stageSplatImg.src = data.splat_url;
+      stageSplat.hidden = false;
+    }
 
     // Show depth
     if (data.depth_url) {
@@ -515,7 +689,7 @@ async function init() {
   await loadMethods();
   await loadDepthModels();
   await loadSettings();
-  pollModelStatus();
+  await pollModelStatus();
 }
 
 init();

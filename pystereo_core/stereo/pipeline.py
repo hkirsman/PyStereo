@@ -195,6 +195,7 @@ class StereoPipeline:
         image: Image.Image,
         stereo_method: BaseStereoMethod,
         method_name: str,
+        intermediates: dict[str, Any] | None = None,
     ) -> Image.Image:
         """Bypass depth preprocessing for methods that predict their own 3D."""
         rgb = image.convert("RGB")
@@ -212,7 +213,7 @@ class StereoPipeline:
             )
 
         logger.info("Stereo [%s]: needs_depth=False, skipping depth pipeline", method_name)
-        left, right = stereo_method.synthesize(rgb, fg_mask, self.settings)
+        left, right = stereo_method.synthesize(rgb, fg_mask, self.settings, intermediates)
         self._release_gpu_cache()
         return Image.fromarray(_compose_sbs(left, right))
 
@@ -223,6 +224,7 @@ class StereoPipeline:
         *,
         divergence_ratio: float | None = None,
         method: StereoMethodName | None = None,
+        intermediates: dict[str, Any] | None = None,
     ) -> Image.Image:
         """Build a horizontal SBS stereo image from a 2D photo + depth map.
 
@@ -237,12 +239,14 @@ class StereoPipeline:
             Optional override for max separation as fraction of width.
         method:
             Override the stereo method for this call (ignores settings).
+        intermediates:
+            If not ``None``, populated with intermediate artifacts.
         """
         method_name = method or self.settings.stereo_method
         stereo_method = self._get_method(method_name)
 
         if not stereo_method.needs_depth:
-            return self._synthesize_no_depth(image, stereo_method, method_name)
+            return self._synthesize_no_depth(image, stereo_method, method_name, intermediates)
 
         p = self._preprocess(
             image, depth_map,
@@ -286,19 +290,20 @@ class StereoPipeline:
         depth_estimator: Any,
         *,
         method: StereoMethodName | None = None,
+        intermediates: dict[str, Any] | None = None,
     ) -> Image.Image:
         """Run depth estimation then synthesize SBS."""
         method_name = method or self.settings.stereo_method
         stereo_method = self._get_method(method_name)
 
         if not stereo_method.needs_depth:
-            return self._synthesize_no_depth(image, stereo_method, method_name)
+            return self._synthesize_no_depth(image, stereo_method, method_name, intermediates)
 
         if hasattr(depth_estimator, "process_raw"):
             depth_f32 = depth_estimator.process_raw(image.convert("RGB"))
-            return self.synthesize(image, depth_f32, method=method)
+            return self.synthesize(image, depth_f32, method=method, intermediates=intermediates)
         depth = depth_estimator.process(image.convert("RGB"))
-        return self.synthesize(image, depth.convert("L"), method=method)
+        return self.synthesize(image, depth.convert("L"), method=method, intermediates=intermediates)
 
 
 def synthesize_sbs(
