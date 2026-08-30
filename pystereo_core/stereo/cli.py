@@ -101,7 +101,10 @@ def _run_synthesis(
 
     if method:
         from pystereo_core.stereo.methods import get_method
-        stereo_method = get_method(method)
+        try:
+            stereo_method = get_method(method)
+        except ValueError as exc:
+            raise RuntimeError(f"Unknown stereo method: {method}") from exc
         if not stereo_method.needs_depth:
             return pipeline._synthesize_no_depth(rgb, stereo_method, method)
 
