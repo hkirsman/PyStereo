@@ -124,7 +124,8 @@ def _fill_wide_direct(
 
 class ComboFillMethod(BaseStereoMethod):
     name: ClassVar[str] = "combo_fill"
-    label: ClassVar[str] = "Combo Fill / AOT-GAN (Deprecated)"
+    label: ClassVar[str] = "Combo Fill / AOT-GAN"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Best of Methods 4 + 5: per-strip anisotropic crop inpainting "
         "with AOT-GAN.  Narrow strips filled by CPU mirror (exact "

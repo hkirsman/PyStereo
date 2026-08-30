@@ -27,6 +27,7 @@ class BaseStereoMethod(ABC):
     name: ClassVar[str]
     label: ClassVar[str]
     description: ClassVar[str]
+    deprecated: ClassVar[bool] = False
 
     wants_full_res: ClassVar[bool] = False
     needs_depth: ClassVar[bool] = True

@@ -137,7 +137,8 @@ def _iterative_patch_fill(
 
 class IterativeFillMethod(BaseStereoMethod):
     name: ClassVar[str] = "iterative_fill"
-    label: ClassVar[str] = "Iterative Local Patch (Deprecated)"
+    label: ClassVar[str] = "Iterative Local Patch"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Per-eye disocclusion fill using depth-sorted iterative local "
         "patching.  Breaks holes into connected components, sorts "

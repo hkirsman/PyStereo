@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 
 class CleanFillMethod(BaseStereoMethod):
     name: ClassVar[str] = "clean_fill"
-    label: ClassVar[str] = "Clean Fill / AOT-GAN (Deprecated)"
+    label: ClassVar[str] = "Clean Fill / AOT-GAN"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Hybrid z-buffer warp with per-eye AOT-GAN inpainting.  "
         "AOT-GAN uses dilated convolutions (no FFC dark bias, no "

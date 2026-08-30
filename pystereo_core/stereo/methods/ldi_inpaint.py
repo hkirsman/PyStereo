@@ -254,7 +254,8 @@ def _run_ldi_inpaint(
 
 class LdiInpaintMethod(BaseStereoMethod):
     name: ClassVar[str] = "ldi_inpaint"
-    label: ClassVar[str] = "LDI Context-Aware Inpaint (Deprecated)"
+    label: ClassVar[str] = "LDI Context-Aware Inpaint"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Context-aware layered depth inpainting (Shih et al., CVPR 2020). "
         "Uses three specialised partial-convolution networks to hallucinate "

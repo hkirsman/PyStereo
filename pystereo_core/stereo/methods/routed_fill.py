@@ -292,7 +292,8 @@ def _inpaint_banded(
 
 class RoutedFillMethod(BaseStereoMethod):
     name: ClassVar[str] = "routed_fill"
-    label: ClassVar[str] = "Width-Routed Fill (Deprecated)"
+    label: ClassVar[str] = "Width-Routed Fill"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Hybrid z-buffer warp with width-routed disocclusion fill.  "
         "Narrow strips (≤ threshold) are mirror-filled from adjacent "

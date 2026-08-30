@@ -52,6 +52,40 @@ def _populate() -> None:
     _REGISTRY["sharp_taichi"] = SharpTaichiMethod
 
 
+# Active methods first, all deprecated last.
+METHOD_UI_ORDER: tuple[str, ...] = (
+    "per_eye_inpaint",
+    "sharp_alpha_taichi",
+    "sharp_alpha",
+    "sharp_detail",
+    "sharp_hires",
+    "sharp_splat",
+    "sharp_taichi",
+    "sharp_depth",
+    "fullres_warp",
+    "bg_plate_fill",
+    "routed_fill",
+    "direct_fill",
+    "clean_fill",
+    "combo_fill",
+    "ldi_inpaint",
+    "iterative_fill",
+    "sharp_mesh",
+)
+
+
+def list_methods_for_ui() -> list[tuple[str, type[BaseStereoMethod]]]:
+    """Return methods in UI display order (active first, deprecated last)."""
+    _populate()
+    order = {name: idx for idx, name in enumerate(METHOD_UI_ORDER)}
+
+    def sort_key(item: tuple[str, type[BaseStereoMethod]]) -> tuple[int, int, str]:
+        name, cls = item
+        return (int(cls.deprecated), order.get(name, len(METHOD_UI_ORDER)), name)
+
+    return sorted(_REGISTRY.items(), key=sort_key)
+
+
 def get_method(name: str) -> BaseStereoMethod:
     """Instantiate a stereo method by name."""
     _populate()

@@ -118,7 +118,8 @@ def _sharpen_inpainted_region(
 
 class BgPlateFillMethod(BaseStereoMethod):
     name: ClassVar[str] = "bg_plate_fill"
-    label: ClassVar[str] = "Background Plate (Deprecated)"
+    label: ClassVar[str] = "Background Plate"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Hybrid z-buffer + cv2.remap warp with stereo-consistent "
         "background-plate fill.  Inpaints foreground out of the source "

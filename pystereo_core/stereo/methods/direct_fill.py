@@ -136,7 +136,8 @@ def _fill_wide_direct(
 
 class DirectFillMethod(BaseStereoMethod):
     name: ClassVar[str] = "direct_fill"
-    label: ClassVar[str] = "Direct Anisotropic Fill (Deprecated)"
+    label: ClassVar[str] = "Direct Anisotropic Fill"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Hybrid z-buffer warp with width-routed disocclusion fill.  "
         "Narrow strips (≤ threshold) are mirror-filled from adjacent "

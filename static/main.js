@@ -50,6 +50,14 @@ let generating = false;
 let pollTimer = null;
 let depthModelStatus = {};
 let methodMeta = {};
+let defaultMethodName = "per_eye_inpaint";
+
+function methodOptionLabel(m) {
+  let label = m.label;
+  if (m.default) label += " (default)";
+  if (m.deprecated) label += " (deprecated)";
+  return label;
+}
 
 // -- Formatting helpers -----------------------------------------------------
 
@@ -351,6 +359,7 @@ async function loadSettings() {
       maxDimValue.textContent = s.max_dim;
     }
     if (s.method) methodSelect.value = s.method;
+    else methodSelect.value = defaultMethodName;
     updateDepthDownloadBtn();
   } catch {
     // Use defaults
@@ -378,8 +387,8 @@ methodSelect.addEventListener("change", () => {
 });
 
 function selectedMethodNeedsDepth() {
-  const method = methodSelect.value;
-  if (!method || !(method in methodMeta)) return true;
+  const method = methodSelect.value || defaultMethodName;
+  if (!(method in methodMeta)) return true;
   return methodMeta[method].needs_depth;
 }
 
@@ -388,13 +397,16 @@ async function loadMethods() {
     const res = await fetch("/api/stereo-methods");
     if (!res.ok) return;
     const methods = await res.json();
+    methodSelect.replaceChildren();
     for (const m of methods) {
       methodMeta[m.name] = m;
+      if (m.default) defaultMethodName = m.name;
       const opt = document.createElement("option");
       opt.value = m.name;
-      opt.textContent = m.name.replace(/_/g, " ");
+      opt.textContent = methodOptionLabel(m);
       methodSelect.appendChild(opt);
     }
+    methodSelect.value = defaultMethodName;
   } catch {
     // Methods will use default
   }
@@ -443,8 +455,7 @@ btnGenerate.addEventListener("click", async () => {
 
   const form = new FormData();
   form.append("file", selectedFile);
-  const method = methodSelect.value;
-  if (method) form.append("method", method);
+  form.append("method", methodSelect.value || defaultMethodName);
   form.append("max_dim", maxDimSlider.value);
   form.append("depth_model", depthModel);
 

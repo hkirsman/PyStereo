@@ -472,11 +472,18 @@ def api_settings_put() -> Any:
 
 @app.route("/api/stereo-methods", methods=["GET"])
 def api_stereo_methods() -> Any:
-    from pystereo_core.stereo.methods import available_methods
+    from pystereo_core.stereo.config import DEFAULT_METHOD
+    from pystereo_core.stereo.methods import list_methods_for_ui
 
     result = []
-    for name, cls in sorted(available_methods().items()):
-        result.append({"name": name, "needs_depth": cls.needs_depth})
+    for name, cls in list_methods_for_ui():
+        result.append({
+            "name": name,
+            "label": cls.label,
+            "needs_depth": cls.needs_depth,
+            "deprecated": cls.deprecated,
+            "default": name == DEFAULT_METHOD,
+        })
     return jsonify(result)
 
 

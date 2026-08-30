@@ -221,6 +221,7 @@ class SharpMeshMethod(_SharpBase):
 
     name: ClassVar[str] = "sharp_mesh"
     label: ClassVar[str] = "SHARP Mesh"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Renders SHARP's depth as a forward-splatted mesh. Triangles "
         "fill small gaps naturally; large disocclusions get stretched "

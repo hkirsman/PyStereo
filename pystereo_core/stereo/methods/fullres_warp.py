@@ -77,6 +77,7 @@ def _upscale_to(img: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
 class FullResWarpMethod(BaseStereoMethod):
     name: ClassVar[str] = "fullres_warp"
     label: ClassVar[str] = "Per-Eye Inpaint (Full-Res)"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Same warp strategy as Per-Eye Inpaint but at full source "
         "resolution. Downscales only for inpainting, then composites "
