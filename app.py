@@ -598,13 +598,13 @@ def api_generate() -> Any:
     max_dim_raw = (request.form.get("max_dim") or "").strip()
     depth_model = (request.form.get("depth_model") or "small").strip().lower()
 
+    effective_method = method_override or _get_pipeline().settings.stereo_method
     gen_needs_depth = True
-    if method_override:
-        try:
-            from pystereo_core.stereo.methods import get_method as _get_stereo_method
-            gen_needs_depth = _get_stereo_method(method_override).needs_depth
-        except ValueError:
-            pass
+    try:
+        from pystereo_core.stereo.methods import get_method as _get_stereo_method
+        gen_needs_depth = _get_stereo_method(effective_method).needs_depth
+    except ValueError:
+        pass
 
     if gen_needs_depth:
         blocked = _require_model_ready()
@@ -699,7 +699,7 @@ def api_generate() -> Any:
         "created": datetime.now(timezone.utc).isoformat(),
         "width": w,
         "height": h,
-        "method": method_override or active_pipeline.settings.stereo_method,
+        "method": effective_method,
         "elapsed_seconds": elapsed,
     }
     (result_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
