@@ -227,7 +227,9 @@ def predict_gaussians(
             f"curl -L -o {ckpt} {SHARP_CKPT_URL}"
         )
 
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    from pystereo_core.registry import detect_device
+
+    device = detect_device()
     torch.manual_seed(0)
 
     f_35mm = _extract_focal_35mm(pil_image)
@@ -263,8 +265,10 @@ def predict_gaussians(
     os.replace(tmp, out)
 
     del predictor
-    if torch.backends.mps.is_available():
+    if device == "mps":
         torch.mps.empty_cache()
+    elif device == "cuda":
+        torch.cuda.empty_cache()
 
     logger.info(
         "SHARP predict done: %d gaussians in %.1fs -> %s",
