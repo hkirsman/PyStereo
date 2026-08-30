@@ -127,9 +127,10 @@ def _artifact_is_local(spec: ArtifactSpec) -> bool:
     if spec.kind == "hf" and spec.repo_id:
         return _hf_repo_is_local(spec.repo_id)
     if spec.kind == "url" and spec.url:
-        env_path = os.environ.get("LAMA_MODEL")
-        if env_path and Path(env_path).is_file():
-            return True
+        if spec.id == "inpaint":
+            env_path = os.environ.get("LAMA_MODEL")
+            if env_path and Path(env_path).is_file():
+                return True
         return _lama_cache_path(spec.url).is_file()
     return False
 
@@ -151,9 +152,10 @@ def _dir_size_bytes(root: Path) -> int:
 def _measure_local_bytes(spec: ArtifactSpec) -> int:
     """Exact on-disk size for a cached artifact (0 if not present)."""
     if spec.kind == "url" and spec.url:
-        env_path = os.environ.get("LAMA_MODEL")
-        if env_path and Path(env_path).is_file():
-            return Path(env_path).stat().st_size
+        if spec.id == "inpaint":
+            env_path = os.environ.get("LAMA_MODEL")
+            if env_path and Path(env_path).is_file():
+                return Path(env_path).stat().st_size
         path = _lama_cache_path(spec.url)
         return path.stat().st_size if path.is_file() else 0
     if spec.kind == "hf" and spec.repo_id:
