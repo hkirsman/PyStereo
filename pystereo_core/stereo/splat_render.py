@@ -332,6 +332,9 @@ def detail_transfer(
     carry the subject's anti-aliased edge and draw a dark outline into the
     background. In both cases keep the splat render's colour.
     Returns (rgb uint8, mask of splat-filled pixels).
+
+    TODO: sharp_detail / sharp_hires often break the lower half of the image
+    while the upper part looks fine - investigate UV/depth reprojection here.
     """
     H, W = eye_depth.shape
     cx0, cy = (W - 1) / 2, (H - 1) / 2

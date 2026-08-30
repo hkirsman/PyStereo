@@ -22,6 +22,7 @@ const previewImg = $("#previewImg");
 const depthModelSelect = $("#depthModelSelect");
 const btnDownloadDepth = $("#btnDownloadDepth");
 const methodSelect = $("#methodSelect");
+const methodInfo = $("#methodInfo");
 const sharpBanner = $("#sharpBanner");
 const sharpBannerText = $(".sharp-banner-text");
 const btnDownloadSharp = $("#btnDownloadSharp");
@@ -408,6 +409,7 @@ async function loadSettings() {
     }
     if (s.method) methodSelect.value = s.method;
     else methodSelect.value = defaultMethodName;
+    updateMethodInfo();
     updateDepthDownloadBtn();
   } catch {
     // Use defaults
@@ -425,6 +427,7 @@ depthModelSelect.addEventListener("change", () => {
 });
 
 methodSelect.addEventListener("change", () => {
+  updateMethodInfo();
   updateGenerateBtn();
   syncModelGate(modelReady ? "ready" : "idle");
   updateSharpBanner();
@@ -433,6 +436,19 @@ methodSelect.addEventListener("change", () => {
     schedulePoll(500);
   }
 });
+
+function updateMethodInfo() {
+  const method = methodSelect.value || defaultMethodName;
+  const meta = methodMeta[method];
+  const text = (meta && meta.ui_info) || "";
+  if (!text) {
+    methodInfo.hidden = true;
+    methodInfo.textContent = "";
+    return;
+  }
+  methodInfo.textContent = text;
+  methodInfo.hidden = false;
+}
 
 function selectedMethodNeedsDepth() {
   const method = methodSelect.value || defaultMethodName;
@@ -573,6 +589,7 @@ async function loadMethods() {
       methodSelect.appendChild(opt);
     }
     methodSelect.value = defaultMethodName;
+    updateMethodInfo();
   } catch {
     // Methods will use default
   }

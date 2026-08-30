@@ -133,6 +133,10 @@ class ComboFillMethod(BaseStereoMethod):
         "AOT-GAN (no dark bias, no FFC global cloning, fast on small "
         "crops).  Poisson seam blending + unilateral mask dilation."
     )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Combines mirror fill for narrow gaps with AOT-GAN "
+        "crops for wide ones."
+    )
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {
         "inpaint_backend": "aotgan",

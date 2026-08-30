@@ -84,6 +84,10 @@ class FullResWarpMethod(BaseStereoMethod):
         "fills back via a feathered occlusion mask. Preserves maximum "
         "sharpness for the ~97% of pixels that are directly warped."
     )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Like Per-Eye Inpaint but warps at full resolution "
+        "for maximum sharpness on directly visible pixels. Slower."
+    )
 
     wants_full_res: ClassVar[bool] = True
 

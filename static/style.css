@@ -322,6 +322,17 @@ body.model-gate-active .app-shell > .layout {
   outline: 1px solid #444;
 }
 
+.method-info {
+  margin: -0.2rem 0 0;
+  font-size: 0.75rem;
+  color: #7a7a7a;
+  line-height: 1.4;
+}
+
+.method-info[hidden] {
+  display: none;
+}
+
 .settings-slider-wrap {
   display: flex;
   align-items: center;

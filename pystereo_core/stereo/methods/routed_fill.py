@@ -303,6 +303,11 @@ class RoutedFillMethod(BaseStereoMethod):
         "+ Poisson seam blending.  "
         "Unilateral mask dilation toward foreground only."
     )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Narrow holes get a fast mirror fill; wide holes use "
+        "the background-plate path. Aimed at cleaner edges than plain "
+        "per-eye inpaint."
+    )
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {
         "guided_filter_eps": 5e-3,

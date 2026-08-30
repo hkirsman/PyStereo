@@ -263,6 +263,10 @@ class LdiInpaintMethod(BaseStereoMethod):
         "objects.  Produces a neural background plate that is warped into "
         "both eyes for stereo-consistent fill."
     )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Neural layered-depth background plate for "
+        "stereo-consistent fills. Heavier and slower than Per-Eye Inpaint."
+    )
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {
         "guided_filter_eps": 5e-3,

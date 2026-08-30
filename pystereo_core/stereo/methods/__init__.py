@@ -55,13 +55,13 @@ def _populate() -> None:
 # Active methods first, all deprecated last.
 METHOD_UI_ORDER: tuple[str, ...] = (
     "per_eye_inpaint",
-    "sharp_alpha_taichi",
-    "sharp_alpha",
+    "sharp_taichi",
     "sharp_detail",
     "sharp_hires",
     "sharp_splat",
-    "sharp_taichi",
     "sharp_depth",
+    "sharp_alpha_taichi",
+    "sharp_alpha",
     "fullres_warp",
     "bg_plate_fill",
     "routed_fill",

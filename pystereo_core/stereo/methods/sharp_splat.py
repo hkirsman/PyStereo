@@ -113,10 +113,17 @@ class SharpSplatMethod(_SharpBase):
         "inpainting step. Slightly soft (SHARP works at 1536^2). "
         "Research-only license."
     )
+    ui_info: ClassVar[str] = (
+        "About 1 minute on a MacBook M4. Selfies can feel uncomfortable "
+        "to look at - suits mid-to-far shots better. True 3D parallax, "
+        "but the image is slightly soft and depth edges can look harsh."
+    )
     _detail_transfer: ClassVar[bool] = False
 
 
 class SharpDetailMethod(_SharpBase):
+    # TODO: Investigate why the lower part of the output looks broken while
+    # the upper part looks pretty good (detail-transfer / reprojection bug?).
     name: ClassVar[str] = "sharp_detail"
     label: ClassVar[str] = "SHARP Detail"
     description: ClassVar[str] = (
@@ -125,10 +132,17 @@ class SharpDetailMethod(_SharpBase):
         "could see that surface (~99%% of pixels). Full photo sharpness, "
         "same 3D geometry. Research-only license."
     )
+    ui_info: ClassVar[str] = (
+        "About 50 seconds on a MacBook M4. Keeps original photo sharpness "
+        "on most pixels. Known bug: the lower part of the image often "
+        "looks broken while the upper part looks fine."
+    )
     _detail_transfer: ClassVar[bool] = True
 
 
 class SharpHiresMethod(_SharpBase):
+    # TODO: Same lower-half breakage as sharp_detail (detail_transfer). Also
+    # remeasure peak memory on M4 - suspected higher than sharp_detail.
     name: ClassVar[str] = "sharp_hires"
     label: ClassVar[str] = "SHARP Hi-res Detail"
     description: ClassVar[str] = (
@@ -137,6 +151,11 @@ class SharpHiresMethod(_SharpBase):
         "sharper disocclusion band. ~5x slower prediction (about 95 s on an "
         "M-series Mac), 3x memory. Experimental - outside the model's "
         "training resolution. Research-only license."
+    )
+    ui_info: ClassVar[str] = (
+        "About 1 minute 30 seconds on a MacBook M4. Same known bug as "
+        "SHARP Detail: the lower half of the image often looks broken. "
+        "May use more memory too (needs a fresh measurement)."
     )
     _detail_transfer: ClassVar[bool] = True
     _internal: ClassVar[int] = 2688
@@ -151,6 +170,11 @@ class SharpAlphaMethod(_SharpBase):
         "depth. Cleanest silhouettes and sharpest disocclusion band of the "
         "SHARP methods. Slow: about 2 min per photo on an M-series Mac "
         "(the per-pixel sort runs in torch). Research-only license."
+    )
+    ui_info: ClassVar[str] = (
+        "Around 2+ minutes on a MacBook M4. Cleanest SHARP silhouettes. "
+        "Prefer SHARP Alpha (taichi) if available - same look, much faster "
+        "render step."
     )
     _detail_transfer: ClassVar[bool] = True
     _internal: ClassVar[int] = 2688
@@ -167,6 +191,12 @@ class SharpAlphaTaichiMethod(_SharpBase):
         "cost. Needs taichi (pip install taichi, Python <= 3.13); falls "
         "back to the torch renderer otherwise. Research-only license."
     )
+    ui_info: ClassVar[str] = (
+        "Best SHARP quality with a fast GPU render. About 1.5 minutes on "
+        "a MacBook M4 (mostly prediction). Very memory hungry - can use "
+        "up to 28 GB. Use with caution. Needs taichi installed; falls "
+        "back to the slower torch path otherwise."
+    )
     _detail_transfer: ClassVar[bool] = True
     _internal: ClassVar[int] = 2688
     _render_mode: ClassVar[RenderMode] = "alpha_taichi"
@@ -175,6 +205,8 @@ class SharpAlphaTaichiMethod(_SharpBase):
 class SharpDepthMethod(_SharpBase):
     """Use SHARP's rendered depth with the existing warp+inpaint pipeline."""
 
+    # TODO: Compare vs Per-Eye Inpaint - results look similar; decide if we
+    # need both or can drop one.
     name: ClassVar[str] = "sharp_depth"
     label: ClassVar[str] = "SHARP Depth"
     description: ClassVar[str] = (
@@ -183,6 +215,11 @@ class SharpDepthMethod(_SharpBase):
         "pipeline (per_eye_inpaint). Better depth than Depth Anything, "
         "familiar warp look. Research-only license."
     )
+    ui_info: ClassVar[str] = (
+        "Uses SHARP for depth, then the same warp + inpaint path as "
+        "Per-Eye Inpaint - results look similar. Needs the SHARP "
+        "checkpoint (slower than plain Per-Eye Inpaint)."
+    )
     _detail_transfer: ClassVar[bool] = False
 
     def synthesize(
@@ -190,6 +227,7 @@ class SharpDepthMethod(_SharpBase):
         image: Image.Image,
         fg_mask: np.ndarray | None,
         settings: StereoSettings,
+        intermediates: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         import cv2
 
@@ -211,6 +249,9 @@ class SharpDepthMethod(_SharpBase):
         w_img, h_img = image.size
         if depth_01.shape != (h_img, w_img):
             depth_01 = cv2.resize(depth_01, (w_img, h_img), interpolation=cv2.INTER_LINEAR)
+
+        if intermediates is not None:
+            intermediates["depth01"] = depth_01
 
         from pystereo_core.stereo.pipeline import StereoPipeline
 
@@ -235,6 +276,10 @@ class SharpMeshMethod(_SharpBase):
         "from neighbours (no AI inpainting). Sharp edges at depth "
         "boundaries. Research-only license."
     )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Mesh fill from SHARP depth - no AI inpainting. "
+        "Sharp edges at depth boundaries; large gaps can stretch."
+    )
     _detail_transfer: ClassVar[bool] = False
 
     def synthesize(
@@ -242,6 +287,7 @@ class SharpMeshMethod(_SharpBase):
         image: Image.Image,
         fg_mask: np.ndarray | None,
         settings: StereoSettings,
+        intermediates: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         from pystereo_core.stereo.mesh_render import render_mesh_stereo
         from pystereo_core.stereo.sharp_predict import predict_gaussians
@@ -268,6 +314,15 @@ class SharpMeshMethod(_SharpBase):
             converge_m=converge_m,
         )
 
+        if intermediates is not None:
+            valid = np.isfinite(center_depth) & (center_depth > 0)
+            inv_d = np.zeros_like(center_depth)
+            inv_d[valid] = 1.0 / center_depth[valid]
+            lo, hi = float(inv_d[valid].min()), float(inv_d[valid].max())
+            depth_01 = (inv_d - lo) / max(hi - lo, 1e-6)
+            depth_01[~valid] = 0.0
+            intermediates["depth01"] = depth_01.astype(np.float32)
+
         logger.info(
             "SHARP mesh: converge=%.2fm",
             converge_m,
@@ -286,6 +341,11 @@ class SharpTaichiMethod(_SharpBase):
         "on Metal/GPU via taichi (5-10x faster). Falls back to the torch "
         "renderer if taichi is not installed. Research-only license."
     )
+    ui_info: ClassVar[str] = (
+        "Possibly one of the fastest SHARP methods - about 20 seconds on "
+        "a MacBook M4. Same look as SHARP Splat with a faster Metal/GPU "
+        "render via taichi. Falls back to torch if taichi is missing."
+    )
     _detail_transfer: ClassVar[bool] = False
 
     def synthesize(
@@ -293,6 +353,7 @@ class SharpTaichiMethod(_SharpBase):
         image: Image.Image,
         fg_mask: np.ndarray | None,
         settings: StereoSettings,
+        intermediates: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         import cv2
 
@@ -318,7 +379,7 @@ class SharpTaichiMethod(_SharpBase):
         if fg_mask is not None:
             subject_mask = fg_mask > 0.5
 
-        _, d0, _ = scene.render(0.0, 0.0)
+        center_rgb, d0, _ = scene.render(0.0, 0.0)
         if subject_mask is not None and subject_mask.any():
             converge_m = float(np.nanmedian(d0[subject_mask]))
         else:
@@ -342,6 +403,18 @@ class SharpTaichiMethod(_SharpBase):
                     cv2.COLOR_BGR2RGB,
                 )
             return img
+
+        if intermediates is not None:
+            intermediates["splat_rgb"] = (
+                linear_to_srgb(center_rgb) * 255
+            ).astype(np.uint8)
+            valid = np.isfinite(d0) & (d0 > 0)
+            inv_d = np.zeros_like(d0)
+            inv_d[valid] = 1.0 / d0[valid]
+            lo, hi = float(inv_d[valid].min()), float(inv_d[valid].max())
+            depth_01 = (inv_d - lo) / max(hi - lo, 1e-6)
+            depth_01[~valid] = 0.0
+            intermediates["depth01"] = depth_01.astype(np.float32)
 
         logger.info(
             "SHARP taichi: converge=%.2fm, backend=%s",

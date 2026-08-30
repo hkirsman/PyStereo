@@ -126,6 +126,10 @@ class BgPlateFillMethod(BaseStereoMethod):
         "once, warps the clean plate into both eyes.  Two-pass LaMa + "
         "Telea with colour correction and sharpening."
     )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Fills holes from a shared background plate so both "
+        "eyes get matching content. Good stereo consistency, softer fills."
+    )
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {
         "guided_filter_eps": 5e-3,

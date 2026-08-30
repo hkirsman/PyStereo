@@ -144,8 +144,12 @@ class DirectFillMethod(BaseStereoMethod):
         "background pixels (CPU, zero dark bias).  Wide regions are "
         "filled directly in each eye view via per-strip anisotropic "
         "crop inpainting (no background plate).  Each strip gets a "
-        "tight horizontal crop — LaMa sees only local texture.  "
+        "tight horizontal crop - LaMa sees only local texture.  "
         "Poisson seam blending + unilateral mask dilation."
+    )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Mirror-fills narrow gaps; inpaints wide ones "
+        "per-eye with tight crops. No shared background plate."
     )
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {

@@ -145,6 +145,10 @@ class IterativeFillMethod(BaseStereoMethod):
         "back-to-front by depth, and inpaints each patch locally with "
         "LaMa so each fill becomes context for the next."
     )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Fills holes back-to-front in small local patches. "
+        "Can help layered scenes; slower than a single full-mask inpaint."
+    )
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {
         "guided_filter_eps": 5e-3,

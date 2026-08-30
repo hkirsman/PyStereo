@@ -41,6 +41,10 @@ class CleanFillMethod(BaseStereoMethod):
         "bg-plate workarounds are needed.  Unilateral mask dilation "
         "toward foreground only + Poisson seam blending."
     )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Per-eye AOT-GAN fill without LaMa dark-bias "
+        "workarounds. Experimental alternate inpainter."
+    )
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {
         "inpaint_backend": "aotgan",

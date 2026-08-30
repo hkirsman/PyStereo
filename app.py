@@ -561,6 +561,7 @@ def api_stereo_methods() -> Any:
             "needs_depth": cls.needs_depth,
             "deprecated": cls.deprecated,
             "default": name == DEFAULT_METHOD,
+            "ui_info": cls.ui_info,
         })
     return jsonify(result)
 

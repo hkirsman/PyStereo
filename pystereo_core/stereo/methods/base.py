@@ -27,6 +27,8 @@ class BaseStereoMethod(ABC):
     name: ClassVar[str]
     label: ClassVar[str]
     description: ClassVar[str]
+    #: Short user-facing tip shown under the method picker in the web UI.
+    ui_info: ClassVar[str] = ""
     deprecated: ClassVar[bool] = False
 
     wants_full_res: ClassVar[bool] = False
