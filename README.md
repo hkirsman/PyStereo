@@ -69,6 +69,12 @@ The web UI and the desktop GUI both expose HTTP endpoints for integration:
 - `GET /health` - returns `{"status": "ok", "kind": "stereo"}`
 - `POST /transform` - accepts a JPEG/PNG upload, returns an SBS JPEG
 
+Optional `/transform` form fields: `method`, `depth_model`, `max_dim`
+(processing resolution) and `max_pixels`. The last one caps the **output** SBS
+area in pixels - synthesis still runs at full resolution and the result is
+downscaled just before encoding, so callers with a fixed display budget (a
+headset, say) do not receive a 50 MP JPEG they will only shrink.
+
 Any application can point its stereo service URL to `http://127.0.0.1:8766`
 to use PyStereo for AI stereo generation.
 

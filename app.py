@@ -585,6 +585,17 @@ def transform() -> Any:
     max_dim_raw = (request.form.get("max_dim") or "").strip()
     depth_model = (request.form.get("depth_model") or "small").strip().lower()
 
+    # Output budget, applied after synthesis. Unlike max_dim (a processing
+    # dimension) this caps the delivered SBS, so the render keeps its
+    # supersampling and the caller does not receive a 50 MP JPEG.
+    max_pixels = 0
+    max_pixels_raw = (request.form.get("max_pixels") or "").strip()
+    if max_pixels_raw:
+        try:
+            max_pixels = max(0, int(max_pixels_raw))
+        except ValueError:
+            LOGGER.warning("Ignoring invalid max_pixels %r", max_pixels_raw)
+
     effective_method = method_override or _get_pipeline().settings.stereo_method
     method_needs_depth = True
     try:
@@ -640,6 +651,21 @@ def transform() -> Any:
         LOGGER.exception("Inference failed for %s", name)
         gui_log(f"  Failed - {name} (see terminal for details)")
         return jsonify({"error": "Inference failed"}), 500
+
+    if max_pixels:
+        from pystereo_core.stereo.fit import fit_to_pixel_budget
+
+        before_w, before_h = sbs_img.size
+        sbs_img = fit_to_pixel_budget(sbs_img, max_pixels, even_width=True)
+        if sbs_img.size != (before_w, before_h):
+            msg = (
+                f"Fitted SBS {before_w}x{before_h} ({before_w * before_h / 1e6:.1f} MP)"
+                f" -> {sbs_img.size[0]}x{sbs_img.size[1]}"
+                f" ({sbs_img.size[0] * sbs_img.size[1] / 1e6:.1f} MP,"
+                f" budget {max_pixels / 1e6:.1f} MP)"
+            )
+            LOGGER.info(msg)
+            gui_log(f"  {msg}")
 
     elapsed = time.perf_counter() - t0
     gui_log(f"  Done - {name} ({elapsed:.1f}s)")
