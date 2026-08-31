@@ -300,6 +300,10 @@ body.model-gate-active .app-shell > .layout {
   flex-wrap: wrap;
 }
 
+.settings-row[hidden] {
+  display: none;
+}
+
 .settings-label {
   font-size: 0.8rem;
   color: var(--muted);

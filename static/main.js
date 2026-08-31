@@ -19,6 +19,7 @@ const gateHint = $(".model-gate-hint");
 const dropZone = $("#dropZone");
 const fileInput = $("#fileInput");
 const previewImg = $("#previewImg");
+const depthModelRow = $("#depthModelRow");
 const depthModelSelect = $("#depthModelSelect");
 const btnDownloadDepth = $("#btnDownloadDepth");
 const methodSelect = $("#methodSelect");
@@ -444,10 +445,11 @@ function updateMethodInfo() {
   if (!text) {
     methodInfo.hidden = true;
     methodInfo.textContent = "";
-    return;
+  } else {
+    methodInfo.textContent = text;
+    methodInfo.hidden = false;
   }
-  methodInfo.textContent = text;
-  methodInfo.hidden = false;
+  depthModelRow.hidden = !selectedMethodNeedsDepth();
 }
 
 function selectedMethodNeedsDepth() {

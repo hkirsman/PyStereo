@@ -61,6 +61,13 @@
           </div>
 
           <div class="settings-row">
+            <span class="settings-label">Method</span>
+            <select id="methodSelect" class="settings-select" aria-label="Stereo method">
+            </select>
+          </div>
+          <p id="methodInfo" class="method-info" hidden></p>
+
+          <div class="settings-row" id="depthModelRow">
             <span class="settings-label">Depth model</span>
             <select id="depthModelSelect" class="settings-select" aria-label="Depth model">
               <option value="small" selected>Small (~95 MB, Apache-2.0)</option>
@@ -69,13 +76,6 @@
             </select>
             <button type="button" class="btn btn-secondary btn-sm" id="btnDownloadDepth" hidden>Download</button>
           </div>
-
-          <div class="settings-row">
-            <span class="settings-label">Method</span>
-            <select id="methodSelect" class="settings-select" aria-label="Stereo method">
-            </select>
-          </div>
-          <p id="methodInfo" class="method-info" hidden></p>
 
           <div class="settings-row sharp-banner" id="sharpBanner" hidden>
             <span class="settings-label"></span>
