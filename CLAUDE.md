@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-PyStereo - standalone AI stereo synthesis that converts 2D photos into side-by-side (SBS) stereo pairs. Depth estimation, perspective warping, and inpainting run locally via PyTorch (CPU / MPS / CUDA). Weights download on first use. PyStereo is used standalone or integrated into Vaela (a Quest 3 stereo viewer) over HTTP.
+PyStereo - standalone AI stereo synthesis that converts 2D photos into side-by-side (SBS) stereo pairs. Depth estimation, perspective warping, and inpainting run locally via PyTorch (CPU / MPS / CUDA). Weights download on first use. Use the web UI, Qt desktop GUI, CLI, or the HTTP `/transform` service.
 
 ## Setup & Run
 

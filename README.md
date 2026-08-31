@@ -119,7 +119,7 @@ Distribute either bundle by zipping the whole output folder, including
 
 Pick a method in the web UI, with `?method=name` on `/transform`, or
 `--method name` on the CLI. The saved choice in `settings.json` is what
-external callers (Vaela) get. Two families:
+external HTTP callers get. Two families:
 
 **Depth-map methods** run the pipeline above: monocular depth, BiRefNet
 healing, forward warp, inpaint. Fast (a few seconds), commercial-safe
