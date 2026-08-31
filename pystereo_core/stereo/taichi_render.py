@@ -42,7 +42,12 @@ def is_taichi_available() -> bool:
         import taichi as ti
         import torch
 
-        arch = ti.metal if torch.backends.mps.is_available() else ti.cpu
+        if torch.cuda.is_available():
+            arch = ti.cuda
+        elif torch.backends.mps.is_available():
+            arch = ti.metal
+        else:
+            arch = ti.cpu
         ti.init(arch=arch, log_level=ti.WARN)
         _ti = ti
         logger.info("Taichi initialised (arch=%s)", arch)
