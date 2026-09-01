@@ -5,7 +5,8 @@ imported by `pystereo_core` - safe to break, safe to delete.
 
 ## taichi_full_render.py
 
-Status: promoted into the app as the `sharp_taichi_full` method
+Status: promoted into the app as the `sharp_alpha_full` and
+`sharp_splat_full` methods
 (`pystereo_core/stereo/taichi_full.py` + `_taichi_full_kernels.py` +
 `methods/sharp_taichi_full.py`). This file stays as the standalone,
 torch-free reference version.

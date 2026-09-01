@@ -8,10 +8,11 @@ taichi, and cv2. SHARP *prediction* (photo -> Gaussians) remains PyTorch -
 it is a neural network, out of scope for a compute-kernel language.
 
 Promoted from ``experiments/taichi_full_render.py``. Compositing reuses the
-proven ``_taichi_kernels.alpha_raster_pass`` tile rasteriser, so the output
-matches ``splat_render.render_stereo(mode="alpha_taichi")`` up to float
-ordering (measured: mean abs pixel diff ~0.4/255 on a 1.18 M Gaussian
-scene).
+proven ``_taichi_kernels`` passes - ``alpha_raster_pass`` for the alpha
+look, ``ewa_zbuffer_pass`` + ``ewa_composite_pass`` for the z-buffer look -
+so the output matches the torch-projection render paths (measured:
+pixel-identical to ``render_stereo(mode="alpha_taichi")`` on a 1.18 M
+Gaussian scene).
 
 This module deliberately does not import ``splat_render`` (which imports
 torch at module level); the render constants below mirror the values there.
@@ -28,7 +29,9 @@ logger = logging.getLogger(__name__)
 
 # Mirrors splat_render.py - keep in sync.
 R_MAX = 7
+HARD_T = 0.35
 SOFT_T = 0.04
+DEPTH_TOL = 0.03
 ALPHA_MAX = 0.99
 MEDIAN_ALPHA = 0.5
 
@@ -87,8 +90,15 @@ class TaichiScene:
         self.height = int(d["height"])
         self.n = len(self.opac)
 
-    def render(self, eye_x: float, cx_shift: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Render one eye. Returns (rgb linear HxWx3, depth HxW metres, holes uint8)."""
+    def render(
+        self, eye_x: float, cx_shift: float, mode: str = "alpha",
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Render one eye. Returns (rgb linear HxWx3, depth HxW metres, holes uint8).
+
+        ``mode``: ``"alpha"`` - depth-sorted front-to-back alpha compositing
+        (the SHARP Alpha look); ``"zbuf"`` - 2-pass z-buffer EWA splatting
+        (the SHARP Splat look).
+        """
         from pystereo_core.stereo import _taichi_full_kernels, _taichi_kernels
         from pystereo_core.stereo.taichi_render import TILE, _bin_tiles
 
@@ -110,6 +120,24 @@ class TaichiScene:
         col = np.ascontiguousarray(self.colors[keep])
         op = np.ascontiguousarray(self.opac[keep])
 
+        if mode == "zbuf":
+            m = len(z)
+            zbuf = np.full(H * W, np.inf, np.float32)
+            acc = np.zeros((H * W, 3), np.float32)
+            wsum = np.zeros(H * W, np.float32)
+            _taichi_kernels.ewa_zbuffer_pass(
+                u, v, z, inv, radius, op, zbuf, W, H, m, R_MAX, HARD_T,
+            )
+            _taichi_kernels.ewa_composite_pass(
+                u, v, z, inv, radius, col, op, zbuf, acc, wsum,
+                W, H, m, SOFT_T, DEPTH_TOL,
+            )
+            holes = (wsum < 1e-4).reshape(H, W).astype(np.uint8) * 255
+            rgb = acc / np.maximum(wsum, 1e-4)[:, None]
+            depth = zbuf.reshape(H, W)
+            depth[~np.isfinite(depth)] = np.nan
+            return rgb.reshape(H, W, 3), depth, holes
+
         glist, starts, ends, tw = _bin_tiles(u, v, z, radius, W, H)
         rgb = np.zeros((H * W, 3), np.float32)
         depth = np.full(H * W, np.nan, np.float32)
@@ -127,12 +155,14 @@ def render_stereo_taichi(
     baseline_m: float,
     converge_m: float | None,
     subject_mask: np.ndarray | None,
+    mode: str = "alpha",
 ) -> dict[str, Any]:
     """Render a stereo pair from a SHARP scene, projection + compositing in Taichi.
 
     Same contract as ``splat_render.render_stereo`` with ``photo=None``:
     returns ``left`` / ``right`` (uint8 RGB, holes inpainted), ``center_rgb``,
-    ``depth01``, ``holes``, and ``notes``. Callers must check
+    ``depth01``, ``holes``, and ``notes``. ``mode`` is
+    :meth:`TaichiScene.render`'s compositing rule. Callers must check
     :func:`is_full_taichi_available` first.
     """
     import cv2
@@ -140,7 +170,7 @@ def render_stereo_taichi(
     scene = TaichiScene(npz_path)
     f = scene.f_px
 
-    c_rgb, d0, _ = scene.render(0.0, 0.0)
+    c_rgb, d0, _ = scene.render(0.0, 0.0, mode=mode)
     if converge_m is None:
         if subject_mask is not None and subject_mask.any():
             converge_m = float(np.nanmedian(d0[subject_mask]))
@@ -148,8 +178,8 @@ def render_stereo_taichi(
             converge_m = float(np.nanpercentile(d0, 10))
 
     shift = f * baseline_m / (2 * converge_m)
-    l_rgb, l_d, l_h = scene.render(-baseline_m / 2, -shift)
-    r_rgb, r_d, r_h = scene.render(+baseline_m / 2, +shift)
+    l_rgb, l_d, l_h = scene.render(-baseline_m / 2, -shift, mode=mode)
+    r_rgb, r_d, r_h = scene.render(+baseline_m / 2, +shift, mode=mode)
 
     def finish(rgb: np.ndarray, holes: np.ndarray) -> np.ndarray:
         img = (_linear_to_srgb(rgb) * 255).astype(np.uint8)

@@ -1,10 +1,18 @@
-"""SHARP splat method rendered entirely by Taichi kernels.
+"""SHARP splat methods rendered entirely by Taichi kernels.
 
 Unlike ``sharp_taichi`` / ``sharp_alpha_taichi`` (torch projection + taichi
-compositing), this method's whole render path - projection, tile binning,
-alpha compositing - runs outside torch (``stereo/taichi_full.py``). SHARP
-prediction itself stays PyTorch. Falls back to the alpha_taichi render path
-(and from there to torch) when taichi is unavailable.
+compositing), these methods' whole render path - projection, tile binning,
+compositing - runs outside torch (``stereo/taichi_full.py``). SHARP
+prediction itself stays PyTorch. Two variants matching the two compositing
+looks:
+
+- ``sharp_alpha_full``: depth-sorted alpha compositing (the SHARP Alpha
+  look) at standard 1536 resolution, pure splat colour.
+- ``sharp_splat_full``: 2-pass z-buffer EWA splatting (the SHARP Splat
+  look).
+
+Both fall back to the equivalent torch-projection render path when taichi
+is unavailable.
 """
 
 from __future__ import annotations
@@ -22,27 +30,15 @@ from pystereo_core.stereo.splat_render import RenderMode
 logger = logging.getLogger(__name__)
 
 
-class SharpTaichiFullMethod(_SharpBase):
-    name: ClassVar[str] = "sharp_taichi_full"
-    label: ClassVar[str] = "SHARP Splat (full taichi)"
-    description: ClassVar[str] = (
-        "Same SHARP Gaussian scene as sharp_splat, but the entire render "
-        "path - projection and depth-sorted alpha compositing - runs as "
-        "Taichi kernels on Metal/GPU, with no torch in the renderer. Both "
-        "eyes render in about a second; SHARP prediction (~1 min) is the "
-        "only remaining cost. Falls back to the alpha_taichi/torch path "
-        "when taichi is unavailable. Research-only license."
-    )
-    ui_info: ClassVar[str] = (
-        "Experimental all-Taichi renderer: same clean alpha-composited look "
-        "as SHARP Alpha, at standard 1536 resolution and with the fastest "
-        "render step. In the packaged Mac app this usually falls back to "
-        "the torch renderer."
-    )
+class _FullTaichiBase(_SharpBase):
+    """Shared synthesize() for the full-taichi render variants."""
+
+    #: Compositing rule for taichi_full.render_stereo_taichi.
+    _taichi_mode: ClassVar[str] = "alpha"
+
     uses_taichi: ClassVar[bool] = True
     _detail_transfer: ClassVar[bool] = False
     _internal: ClassVar[int] = 1536
-    _render_mode: ClassVar[RenderMode] = "alpha_taichi"  # fallback path only
 
     def synthesize(
         self,
@@ -58,8 +54,8 @@ class SharpTaichiFullMethod(_SharpBase):
 
         if not is_full_taichi_available():
             logger.info(
-                "sharp_taichi_full: taichi unavailable, falling back to %s render",
-                self._render_mode,
+                "%s: taichi unavailable, falling back to %s render",
+                self.name, self._render_mode,
             )
             return super().synthesize(image, fg_mask, settings, intermediates)
 
@@ -76,6 +72,7 @@ class SharpTaichiFullMethod(_SharpBase):
             baseline_m=BASELINE_M,
             converge_m=None,
             subject_mask=subject_mask,
+            mode=self._taichi_mode,
         )
 
         if intermediates is not None:
@@ -84,7 +81,9 @@ class SharpTaichiFullMethod(_SharpBase):
 
         notes = result.get("notes", {})
         logger.info(
-            "SHARP full-taichi: converge=%.2fm, disp=[%.1f, %.1f]px, holes L/R=%.3f/%.3f%%",
+            "SHARP full-taichi (%s): converge=%.2fm, disp=[%.1f, %.1f]px, "
+            "holes L/R=%.3f/%.3f%%",
+            self._taichi_mode,
             notes.get("converge_m", 0),
             notes.get("disp_px_far", 0),
             notes.get("disp_px_near", 0),
@@ -93,3 +92,45 @@ class SharpTaichiFullMethod(_SharpBase):
         )
 
         return result["left"], result["right"]
+
+
+class SharpAlphaFullMethod(_FullTaichiBase):
+    name: ClassVar[str] = "sharp_alpha_full"
+    label: ClassVar[str] = "SHARP Alpha (full taichi)"
+    description: ClassVar[str] = (
+        "Depth-sorted alpha compositing (the SHARP Alpha look) with the "
+        "entire render path - projection and compositing - as Taichi "
+        "kernels on Metal/GPU, no torch in the renderer. Standard 1536 "
+        "resolution, pure splat colour (no detail transfer). Both eyes "
+        "render in about a second; SHARP prediction (~1 min) is the only "
+        "remaining cost. Falls back to the alpha_taichi/torch path when "
+        "taichi is unavailable. Research-only license."
+    )
+    ui_info: ClassVar[str] = (
+        "Experimental all-Taichi renderer: same clean alpha-composited look "
+        "as SHARP Alpha, at standard 1536 resolution and with the fastest "
+        "render step. In the packaged Mac app this usually falls back to "
+        "the torch renderer."
+    )
+    _taichi_mode: ClassVar[str] = "alpha"
+    _render_mode: ClassVar[RenderMode] = "alpha_taichi"  # fallback path only
+
+
+class SharpSplatFullMethod(_FullTaichiBase):
+    name: ClassVar[str] = "sharp_splat_full"
+    label: ClassVar[str] = "SHARP Splat (full taichi)"
+    description: ClassVar[str] = (
+        "Same z-buffer EWA splatting look as sharp_splat, with the entire "
+        "render path - projection and compositing - as Taichi kernels on "
+        "Metal/GPU, no torch in the renderer. Both eyes render in about a "
+        "second; SHARP prediction (~1 min) is the only remaining cost. "
+        "Falls back to the torch renderer when taichi is unavailable. "
+        "Research-only license."
+    )
+    ui_info: ClassVar[str] = (
+        "Experimental all-Taichi renderer: same look as SHARP Splat with "
+        "the fastest render step. In the packaged Mac app this usually "
+        "falls back to the torch renderer."
+    )
+    _taichi_mode: ClassVar[str] = "zbuf"
+    _render_mode: ClassVar[RenderMode] = "zbuf"  # fallback path only
