@@ -49,6 +49,13 @@ const stageSbs = $("#stageSbs");
 const stageSbsImg = $("#stageSbsImg");
 const stageTiming = $("#stageTiming");
 
+const lightbox = $("#lightbox");
+const lightboxImg = $("#lightboxImg");
+const lightboxCaption = $("#lightboxCaption");
+const lightboxClose = $("#lightboxClose");
+const lightboxPrev = $("#lightboxPrev");
+const lightboxNext = $("#lightboxNext");
+
 // -- State ------------------------------------------------------------------
 
 let selectedFile = null;
@@ -713,6 +720,70 @@ btnGenerate.addEventListener("click", async () => {
 
   generating = false;
   updateGenerateBtn();
+});
+
+// -- Lightbox --------------------------------------------------------------
+
+/** Stage images currently visible in the Output panel, in display order. */
+let lightboxItems = [];
+let lightboxIndex = 0;
+
+function visibleStageImages() {
+  return Array.from($$(".stage-card")).filter((card) => !card.hidden).map((card) => card.querySelector(".stage-img"));
+}
+
+function showLightboxItem(index) {
+  const img = lightboxItems[index];
+  if (!img) return;
+  lightboxIndex = index;
+  lightboxImg.src = img.currentSrc || img.src;
+  lightboxImg.alt = img.alt;
+  const label = img.closest(".stage-card").querySelector(".stage-label");
+  lightboxCaption.textContent = label ? label.textContent : "";
+  const multiple = lightboxItems.length > 1;
+  lightboxPrev.hidden = !multiple;
+  lightboxNext.hidden = !multiple;
+}
+
+function openLightbox(img) {
+  lightboxItems = visibleStageImages();
+  const index = lightboxItems.indexOf(img);
+  if (index < 0) return;
+  showLightboxItem(index);
+  lightbox.hidden = false;
+  document.body.classList.add("lightbox-open");
+  lightboxClose.focus();
+}
+
+function closeLightbox() {
+  lightbox.hidden = true;
+  lightboxImg.removeAttribute("src");
+  document.body.classList.remove("lightbox-open");
+}
+
+function stepLightbox(delta) {
+  if (lightboxItems.length < 2) return;
+  const next = (lightboxIndex + delta + lightboxItems.length) % lightboxItems.length;
+  showLightboxItem(next);
+}
+
+$$(".stage-img").forEach((img) => {
+  img.addEventListener("click", () => openLightbox(img));
+});
+
+// Clicking the backdrop closes; clicks on the image or buttons do not.
+lightbox.addEventListener("click", (e) => {
+  if (e.target === lightbox) closeLightbox();
+});
+lightboxClose.addEventListener("click", closeLightbox);
+lightboxPrev.addEventListener("click", () => stepLightbox(-1));
+lightboxNext.addEventListener("click", () => stepLightbox(1));
+
+document.addEventListener("keydown", (e) => {
+  if (lightbox.hidden) return;
+  if (e.key === "Escape") closeLightbox();
+  else if (e.key === "ArrowLeft") stepLightbox(-1);
+  else if (e.key === "ArrowRight") stepLightbox(1);
 });
 
 // -- Init -------------------------------------------------------------------

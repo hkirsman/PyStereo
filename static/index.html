@@ -144,6 +144,14 @@
       </main>
     </div>
 
+    <div id="lightbox" class="lightbox" hidden role="dialog" aria-modal="true" aria-label="Full screen preview">
+      <button type="button" class="lightbox-btn lightbox-close" id="lightboxClose" aria-label="Close preview">&#10005;</button>
+      <button type="button" class="lightbox-btn lightbox-prev" id="lightboxPrev" aria-label="Previous image">&#10094;</button>
+      <button type="button" class="lightbox-btn lightbox-next" id="lightboxNext" aria-label="Next image">&#10095;</button>
+      <img id="lightboxImg" class="lightbox-img" alt="" />
+      <p id="lightboxCaption" class="lightbox-caption"></p>
+    </div>
+
     <script type="module" src="/main.js?v={{version}}"></script>
   </body>
 </html>
