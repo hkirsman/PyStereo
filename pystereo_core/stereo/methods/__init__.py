@@ -56,9 +56,9 @@ def _populate() -> None:
 METHOD_UI_ORDER: tuple[str, ...] = (
     "per_eye_inpaint",
     "sharp_taichi",
+    "sharp_splat",
     "sharp_detail",
     "sharp_hires",
-    "sharp_splat",
     "sharp_depth",
     "sharp_alpha_taichi",
     "sharp_alpha",
