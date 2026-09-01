@@ -15,12 +15,17 @@ Two kernels:
 Install with ``pip install taichi`` (~50 MB). Taichi 1.7 ships wheels for
 Python 3.9-3.13; on newer interpreters the torch fallback is used
 transparently.
+
+PyInstaller / frozen builds: Taichi needs readable kernel source. Kernels
+live in ``_taichi_kernels.py`` at module scope; if compilation still
+fails, :func:`is_taichi_available` returns False and callers use torch.
 """
 
 # No ``from __future__ import annotations`` here: taichi reads kernel argument
 # annotations at runtime and cannot parse them as strings.
 import logging
-from typing import TYPE_CHECKING
+import sys
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
@@ -31,6 +36,16 @@ logger = logging.getLogger(__name__)
 
 _ti = None
 _ti_checked = False
+_kernels = None
+
+
+def _load_kernels():
+    global _kernels
+    if _kernels is None:
+        from pystereo_core.stereo import _taichi_kernels
+
+        _kernels = _taichi_kernels
+    return _kernels
 
 
 def is_taichi_available() -> bool:
@@ -49,11 +64,19 @@ def is_taichi_available() -> bool:
         else:
             arch = ti.cpu
         ti.init(arch=arch, log_level=ti.WARN)
+        _load_kernels().probe_kernels()
         _ti = ti
         logger.info("Taichi initialised (arch=%s)", arch)
         return True
     except Exception as exc:
-        logger.info("Taichi not available (%s); will use torch fallback", exc)
+        if getattr(sys, "frozen", False):
+            logger.info(
+                "Taichi kernels unavailable in packaged app (%s); using torch fallback",
+                exc,
+            )
+        else:
+            logger.info("Taichi not available (%s); will use torch fallback", exc)
+        _ti = None
         return False
 
 
@@ -61,14 +84,12 @@ def composite_ewa_taichi(
     p: "_Projected",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """EWA splatting via taichi - same result as the torch path, faster on GPU."""
-    import torch
-
     from pystereo_core.stereo.splat_render import DEPTH_TOL, HARD_T, R_MAX, SOFT_T
 
-    ti = _ti
-    if ti is None:
+    if _ti is None:
         raise RuntimeError("Taichi not initialised")
 
+    kernels = _load_kernels()
     H, W = p.H, p.W
     N = len(p.z)
 
@@ -84,90 +105,14 @@ def composite_ewa_taichi(
     acc = np.zeros((H * W, 3), dtype=np.float32)
     wsum = np.zeros(H * W, dtype=np.float32)
 
-    @ti.kernel
-    def zbuffer_pass(
-        u: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        v: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        z: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        inv_flat: ti.types.ndarray(dtype=ti.f32, ndim=2),
-        radius: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        op: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        zbuf_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        W_: ti.i32, H_: ti.i32, N_: ti.i32,
-        r_max: ti.i32, hard_t: ti.f32,
-    ):
-        for idx in range(N_):
-            mu_x = u[idx]
-            mu_y = v[idx]
-            rad = ti.cast(radius[idx], ti.i32)
-            x0 = ti.max(0, ti.cast(ti.round(mu_x) - rad, ti.i32))
-            x1 = ti.min(W_, ti.cast(ti.round(mu_x) + rad + 1, ti.i32))
-            y0 = ti.max(0, ti.cast(ti.round(mu_y) - rad, ti.i32))
-            y1 = ti.min(H_, ti.cast(ti.round(mu_y) + rad + 1, ti.i32))
-            a = inv_flat[idx, 0]
-            b = inv_flat[idx, 1]
-            c = inv_flat[idx, 3]
-            o = op[idx]
-            d = z[idx]
-            for py in range(y0, y1):
-                for px in range(x0, x1):
-                    dx = ti.cast(px, ti.f32) - mu_x
-                    dy = ti.cast(py, ti.f32) - mu_y
-                    q = a * dx * dx + 2.0 * b * dx * dy + c * dy * dy
-                    w = o * ti.exp(-0.5 * q)
-                    if w > hard_t:
-                        flat = py * W_ + px
-                        ti.atomic_min(zbuf_out[flat], d)
-
-    @ti.kernel
-    def composite_pass(
-        u: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        v: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        z: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        inv_flat: ti.types.ndarray(dtype=ti.f32, ndim=2),
-        radius: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        col: ti.types.ndarray(dtype=ti.f32, ndim=2),
-        op: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        zbuf_in: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        acc_out: ti.types.ndarray(dtype=ti.f32, ndim=2),
-        wsum_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        W_: ti.i32, H_: ti.i32, N_: ti.i32,
-        soft_t: ti.f32, depth_tol: ti.f32,
-    ):
-        for idx in range(N_):
-            mu_x = u[idx]
-            mu_y = v[idx]
-            rad = ti.cast(radius[idx], ti.i32)
-            x0 = ti.max(0, ti.cast(ti.round(mu_x) - rad, ti.i32))
-            x1 = ti.min(W_, ti.cast(ti.round(mu_x) + rad + 1, ti.i32))
-            y0 = ti.max(0, ti.cast(ti.round(mu_y) - rad, ti.i32))
-            y1 = ti.min(H_, ti.cast(ti.round(mu_y) + rad + 1, ti.i32))
-            a = inv_flat[idx, 0]
-            b = inv_flat[idx, 1]
-            c = inv_flat[idx, 3]
-            o = op[idx]
-            d = z[idx]
-            r = col[idx, 0]
-            g = col[idx, 1]
-            bl = col[idx, 2]
-            for py in range(y0, y1):
-                for px in range(x0, x1):
-                    dx = ti.cast(px, ti.f32) - mu_x
-                    dy = ti.cast(py, ti.f32) - mu_y
-                    q = a * dx * dx + 2.0 * b * dx * dy + c * dy * dy
-                    w = o * ti.exp(-0.5 * q)
-                    if w > soft_t:
-                        flat = py * W_ + px
-                        if ti.abs(d - zbuf_in[flat]) <= zbuf_in[flat] * depth_tol:
-                            ti.atomic_add(wsum_out[flat], w)
-                            ti.atomic_add(acc_out[flat, 0], w * r)
-                            ti.atomic_add(acc_out[flat, 1], w * g)
-                            ti.atomic_add(acc_out[flat, 2], w * bl)
-
-    zbuffer_pass(u_np, v_np, z_np, inv_np, radius_np, op_np, zbuf,
-                 W, H, N, R_MAX, HARD_T)
-    composite_pass(u_np, v_np, z_np, inv_np, radius_np, col_np, op_np,
-                   zbuf, acc, wsum, W, H, N, SOFT_T, DEPTH_TOL)
+    kernels.ewa_zbuffer_pass(
+        u_np, v_np, z_np, inv_np, radius_np, op_np, zbuf,
+        W, H, N, R_MAX, HARD_T,
+    )
+    kernels.ewa_composite_pass(
+        u_np, v_np, z_np, inv_np, radius_np, col_np, op_np,
+        zbuf, acc, wsum, W, H, N, SOFT_T, DEPTH_TOL,
+    )
 
     holes = wsum < 1e-4
     safe_w = np.maximum(wsum, 1e-4)
@@ -225,10 +170,10 @@ def composite_alpha_taichi(
     """
     from pystereo_core.stereo.splat_render import ALPHA_MAX, MEDIAN_ALPHA, SOFT_T
 
-    ti = _ti
-    if ti is None:
+    if _ti is None:
         raise RuntimeError("Taichi not initialised")
 
+    kernels = _load_kernels()
     H, W = p.H, p.W
     u_np = p.u.cpu().numpy().astype(np.float32)
     v_np = p.v.cpu().numpy().astype(np.float32)
@@ -244,71 +189,19 @@ def composite_alpha_taichi(
     depth = np.full(H * W, np.nan, dtype=np.float32)
     asum_out = np.zeros(H * W, dtype=np.float32)
 
-    @ti.kernel
-    def raster(
-        u: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        v: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        z: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        inv_flat: ti.types.ndarray(dtype=ti.f32, ndim=2),
-        radius: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        col: ti.types.ndarray(dtype=ti.f32, ndim=2),
-        op: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        gl: ti.types.ndarray(dtype=ti.i32, ndim=1),
-        st: ti.types.ndarray(dtype=ti.i32, ndim=1),
-        en: ti.types.ndarray(dtype=ti.i32, ndim=1),
-        rgb_out: ti.types.ndarray(dtype=ti.f32, ndim=2),
-        depth_out: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        asum_o: ti.types.ndarray(dtype=ti.f32, ndim=1),
-        W_: ti.i32, H_: ti.i32, tw_: ti.i32, tile: ti.i32,
-        soft_t: ti.f32, a_max: ti.f32, med_alpha: ti.f32,
-    ):
-        for pix in range(W_ * H_):
-            px = pix % W_
-            py = pix // W_
-            tid = (py // tile) * tw_ + px // tile
-            fx = ti.cast(px, ti.f32)
-            fy = ti.cast(py, ti.f32)
-            T = 1.0
-            ar = 0.0
-            ag = 0.0
-            ab = 0.0
-            asum = 0.0
-            med = ti.f32(1e30)
-            near = ti.f32(1e30)
-            for k in range(st[tid], en[tid]):
-                if T < 1e-4:
-                    break
-                gi = gl[k]
-                if ti.abs(fx - ti.round(u[gi])) > radius[gi] or ti.abs(fy - ti.round(v[gi])) > radius[gi]:
-                    continue
-                dx = fx - u[gi]
-                dy = fy - v[gi]
-                q = inv_flat[gi, 0] * dx * dx + 2.0 * inv_flat[gi, 1] * dx * dy + inv_flat[gi, 3] * dy * dy
-                a = ti.min(op[gi] * ti.exp(-0.5 * q), a_max)
-                if a <= soft_t:
-                    continue
-                if near > 1e29:
-                    near = z[gi]
-                w = T * a
-                ar += w * col[gi, 0]
-                ag += w * col[gi, 1]
-                ab += w * col[gi, 2]
-                asum += w
-                if med > 1e29 and asum >= med_alpha:
-                    med = z[gi]
-                T *= 1.0 - a
-            s = ti.max(asum, 1e-4)
-            rgb_out[pix, 0] = ar / s
-            rgb_out[pix, 1] = ag / s
-            rgb_out[pix, 2] = ab / s
-            asum_o[pix] = asum
-            if med < 1e29:
-                depth_out[pix] = med
-            elif near < 1e29:
-                depth_out[pix] = near
-
-    raster(u_np, v_np, z_np, inv_np, radius_np, col_np, op_np, glist, starts, ends,
-           rgb, depth, asum_out, W, H, tw, TILE, SOFT_T, ALPHA_MAX, MEDIAN_ALPHA)
+    kernels.alpha_raster_pass(
+        u_np, v_np, z_np, inv_np, radius_np, col_np, op_np, glist, starts, ends,
+        rgb, depth, asum_out, W, H, tw, TILE, SOFT_T, ALPHA_MAX, MEDIAN_ALPHA,
+    )
 
     holes = (asum_out < 0.01).reshape(H, W).astype(np.uint8) * 255
     return rgb.reshape(H, W, 3), depth.reshape(H, W), holes
+
+
+def select_ewa_compositor() -> Callable:
+    """Return the best available EWA compositor (taichi or torch)."""
+    from pystereo_core.stereo.splat_render import composite_ewa_torch
+
+    if is_taichi_available():
+        return composite_ewa_taichi
+    return composite_ewa_torch

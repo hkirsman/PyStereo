@@ -40,8 +40,18 @@ else:
     print("WARNING: ml-sharp/src missing - SHARP methods will not work in the bundle.")
     print("Run: git submodule update --init ml-sharp")
 
+_taichi_kernels = REPO / "pystereo_core" / "stereo" / "_taichi_kernels.py"
+if _taichi_kernels.is_file():
+    datas.append((str(_taichi_kernels), "pystereo_core/stereo"))
+
 try:
     datas += copy_metadata("imageio")
+except Exception:
+    pass
+
+_taichi_hidden: list[str] = []
+try:
+    _taichi_hidden = collect_submodules("taichi")
 except Exception:
     pass
 
@@ -50,6 +60,7 @@ hiddenimports = (
     + collect_submodules("pystereo_core.stereo")
     + collect_submodules("pystereo_core.stereo.methods")
     + (collect_submodules("sharp") if (REPO / "ml-sharp" / "src").is_dir() else [])
+    + _taichi_hidden
     + [
         "PIL",
         "PIL.Image",
@@ -63,6 +74,8 @@ hiddenimports = (
         "PySide6.QtWidgets",
         "pystereo_core.logging_config",
         "pystereo_core.sharp_imports",
+        "pystereo_core.stereo._taichi_kernels",
+        "pystereo_core.stereo.taichi_render",
         "imageio",
         "imageio.v2",
         "imageio.core",

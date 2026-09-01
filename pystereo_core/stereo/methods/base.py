@@ -33,6 +33,8 @@ class BaseStereoMethod(ABC):
 
     wants_full_res: ClassVar[bool] = False
     needs_depth: ClassVar[bool] = True
+    #: True when the method can use Taichi for the splat render step.
+    uses_taichi: ClassVar[bool] = False
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {}
 

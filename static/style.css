@@ -331,6 +331,12 @@ body.model-gate-active .app-shell > .layout {
   font-size: 0.75rem;
   color: #7a7a7a;
   line-height: 1.4;
+  white-space: pre-line;
+}
+
+.taichi-status {
+  margin-top: 0.35rem;
+  color: #8a9bb0;
 }
 
 .method-info[hidden] {

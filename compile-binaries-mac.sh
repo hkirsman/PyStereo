@@ -34,6 +34,9 @@ if [[ ! -d "$ROOT/ml-sharp/src/sharp" ]]; then
 fi
 "$ROOT/$PYTHON" -m pip install -e ./ml-sharp --no-deps
 
+echo "Installing optional Taichi (SHARP Taichi methods, faster GPU render)..."
+"$ROOT/$PYTHON" -m pip install -q taichi 2>/dev/null || echo "  (taichi not installed - SHARP Taichi will use torch fallback)"
+
 echo "Installing PyInstaller into .venv (if needed)..."
 "$ROOT/$PYTHON" -m pip install -q -U pyinstaller
 

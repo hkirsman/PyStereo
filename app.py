@@ -610,19 +610,31 @@ def api_stereo_methods() -> Any:
         from pystereo_core.stereo.methods import list_methods_for_ui
 
         sharp_code = is_sharp_code_available()
+        taichi_render_available = False
+        try:
+            from pystereo_core.stereo.taichi_render import is_taichi_available
+
+            taichi_render_available = is_taichi_available()
+        except Exception:
+            pass
         result = []
         for name, cls in list_methods_for_ui():
             if not cls.needs_depth and not sharp_code:
                 continue
-            result.append({
+            entry: dict[str, Any] = {
                 "name": name,
                 "label": cls.label,
                 "needs_depth": cls.needs_depth,
                 "deprecated": cls.deprecated,
                 "default": name == DEFAULT_METHOD,
                 "ui_info": cls.ui_info,
-            })
-        return jsonify(result)
+                "uses_taichi": bool(getattr(cls, "uses_taichi", False)),
+            }
+            result.append(entry)
+        return jsonify({
+            "methods": result,
+            "taichi_render_available": taichi_render_available,
+        })
     except Exception as exc:
         LOGGER.exception("Failed to list stereo methods")
         return jsonify({"error": str(exc)}), 500

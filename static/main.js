@@ -24,6 +24,7 @@ const depthModelSelect = $("#depthModelSelect");
 const btnDownloadDepth = $("#btnDownloadDepth");
 const methodSelect = $("#methodSelect");
 const methodInfo = $("#methodInfo");
+const taichiStatus = $("#taichiStatus");
 const sharpBanner = $("#sharpBanner");
 const sharpBannerText = $(".sharp-banner-text");
 const btnDownloadSharp = $("#btnDownloadSharp");
@@ -72,12 +73,29 @@ let pollTimer = null;
 let depthModelStatus = {};
 let methodMeta = {};
 let defaultMethodName = "per_eye_inpaint";
+let taichiRenderAvailable = false;
 
 function methodOptionLabel(m) {
   let label = m.label;
   if (m.default) label += " (default)";
   if (m.deprecated) label += " (deprecated)";
   return label;
+}
+
+function taichiRenderNote(meta) {
+  if (!meta || !meta.uses_taichi) return "";
+  if (taichiRenderAvailable) {
+    return "Render: Taichi (Metal/GPU).";
+  }
+  return "Render: torch fallback in this build (same output, slower splat step).";
+}
+
+function refreshMethodOptionLabels() {
+  for (const opt of methodSelect.options) {
+    const m = methodMeta[opt.value];
+    if (!m) continue;
+    opt.textContent = methodOptionLabel(m);
+  }
 }
 
 // -- Formatting helpers -----------------------------------------------------
@@ -448,10 +466,27 @@ methodSelect.addEventListener("change", () => {
   }
 });
 
+function updateTaichiStatus() {
+  const hasTaichiMethods = Object.values(methodMeta).some((m) => m.uses_taichi);
+  if (!hasTaichiMethods) {
+    taichiStatus.hidden = true;
+    taichiStatus.textContent = "";
+    return;
+  }
+  taichiStatus.textContent = taichiRenderAvailable
+    ? "Taichi GPU render: available on this machine."
+    : "Taichi GPU render: not available here - (taichi) methods use torch.";
+  taichiStatus.hidden = false;
+}
+
 function updateMethodInfo() {
   const method = methodSelect.value || defaultMethodName;
   const meta = methodMeta[method];
-  const text = (meta && meta.ui_info) || "";
+  let text = (meta && meta.ui_info) || "";
+  const renderNote = taichiRenderNote(meta);
+  if (renderNote) {
+    text = text ? `${text}\n\n${renderNote}` : renderNote;
+  }
   if (!text) {
     methodInfo.hidden = true;
     methodInfo.textContent = "";
@@ -595,7 +630,11 @@ async function loadMethods() {
       console.error("stereo-methods failed", res.status, text);
       return;
     }
-    const methods = await res.json();
+    const data = await res.json();
+    const methods = Array.isArray(data) ? data : data.methods;
+    if (typeof data.taichi_render_available === "boolean") {
+      taichiRenderAvailable = data.taichi_render_available;
+    }
     if (!Array.isArray(methods) || methods.length === 0) {
       setStatus("No stereo methods available in this build.", false, true);
       return;
@@ -610,6 +649,8 @@ async function loadMethods() {
       methodSelect.appendChild(opt);
     }
     methodSelect.value = defaultMethodName;
+    refreshMethodOptionLabels();
+    updateTaichiStatus();
     updateMethodInfo();
   } catch (err) {
     setStatus("Failed to load stereo methods: " + err.message, false, true);

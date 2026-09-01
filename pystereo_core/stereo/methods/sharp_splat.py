@@ -192,11 +192,11 @@ class SharpAlphaTaichiMethod(_SharpBase):
         "back to the torch renderer otherwise. Research-only license."
     )
     ui_info: ClassVar[str] = (
-        "Best SHARP quality with a fast GPU render. About 1.5 minutes on "
-        "a MacBook M4 (mostly prediction). Very memory hungry - can use "
-        "up to 28 GB. Use with caution. Needs taichi installed; falls "
-        "back to the slower torch path otherwise."
+        "Same quality as SHARP Alpha, with a faster splat render when Taichi "
+        "is available. In the packaged Mac app this usually runs on torch "
+        "instead."
     )
+    uses_taichi: ClassVar[bool] = True
     _detail_transfer: ClassVar[bool] = True
     _internal: ClassVar[int] = 2688
     _render_mode: ClassVar[RenderMode] = "alpha_taichi"
@@ -335,17 +335,18 @@ class SharpTaichiMethod(_SharpBase):
     """Taichi-accelerated Gaussian splatting (same look, faster render)."""
 
     name: ClassVar[str] = "sharp_taichi"
-    label: ClassVar[str] = "SHARP Taichi"
+    label: ClassVar[str] = "SHARP Splat (taichi)"
     description: ClassVar[str] = (
         "Same EWA Gaussian splatting as sharp_splat but compositing runs "
         "on Metal/GPU via taichi (5-10x faster). Falls back to the torch "
         "renderer if taichi is not installed. Research-only license."
     )
     ui_info: ClassVar[str] = (
-        "Possibly one of the fastest SHARP methods - about 20 seconds on "
-        "a MacBook M4. Same look as SHARP Splat with a faster Metal/GPU "
-        "render via taichi. Falls back to torch if taichi is missing."
+        "Same stereo as SHARP Splat, with a faster splat render when Taichi "
+        "is available (~20 s on a MacBook M4). In the packaged Mac app this "
+        "usually runs on torch instead."
     )
+    uses_taichi: ClassVar[bool] = True
     _detail_transfer: ClassVar[bool] = False
 
     def synthesize(
@@ -360,19 +361,15 @@ class SharpTaichiMethod(_SharpBase):
         from pystereo_core.stereo.sharp_predict import predict_gaussians
         from pystereo_core.stereo.splat_render import (
             SharpScene,
-            composite_ewa_torch,
             linear_to_srgb,
         )
-        from pystereo_core.stereo.taichi_render import (
-            composite_ewa_taichi,
-            is_taichi_available,
-        )
+        from pystereo_core.stereo.taichi_render import select_ewa_compositor
 
         npz_path = predict_gaussians(image)
         scene = SharpScene(str(npz_path))
 
-        composite = composite_ewa_taichi if is_taichi_available() else composite_ewa_torch
-        backend = "taichi" if is_taichi_available() else "torch"
+        composite = select_ewa_compositor()
+        backend = "taichi" if composite.__name__ == "composite_ewa_taichi" else "torch"
         logger.info("SHARP taichi: using %s compositing backend", backend)
 
         subject_mask: np.ndarray | None = None
