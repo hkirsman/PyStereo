@@ -198,6 +198,9 @@ def predict_gaussians(
     """
     from PIL import ImageOps
 
+    from pystereo_core.sharp_imports import ensure_sharp_imports
+
+    ensure_sharp_imports()
     from sharp.models import PredictorParams, create_predictor
     from sharp.models.encoders import spn_encoder
 

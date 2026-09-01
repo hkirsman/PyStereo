@@ -11,18 +11,38 @@
 import pathlib
 import sys
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 block_cipher = None
 
 REPO = pathlib.Path(SPECPATH).resolve().parent
 _PACKAGING = pathlib.Path(SPECPATH).resolve()
 
+if sys.platform == "win32":
+    ICON = (_PACKAGING / "pystereo.ico").resolve()
+elif sys.platform == "darwin":
+    ICON = (_PACKAGING / "pystereo.icns").resolve()
+else:
+    ICON = None
+
+if ICON is not None and not ICON.is_file():
+    raise SystemExit(f"Missing {ICON} - run: python packaging/brand_icon.py")
+
 datas = [
-    (str(REPO / "pystereo_core" / "_version.py"), "pystereo_core"),
+    (str(REPO / "version.txt"), "."),
 ]
+if (REPO / "ml-sharp" / "src").is_dir():
+    datas.append((str(REPO / "ml-sharp" / "src"), "ml-sharp/src"))
+else:
+    print("WARNING: ml-sharp/src missing - SHARP methods will not work in the bundle.")
+    print("Run: git submodule update --init ml-sharp")
 if (REPO / "static").is_dir():
     datas.append((str(REPO / "static"), "static"))
+
+try:
+    datas += copy_metadata("imageio")
+except Exception:
+    pass
 
 for pkg in ("flask", "werkzeug", "jinja2"):
     try:
@@ -34,6 +54,7 @@ hiddenimports = (
     collect_submodules("pystereo_core")
     + collect_submodules("pystereo_core.stereo")
     + collect_submodules("pystereo_core.stereo.methods")
+    + (collect_submodules("sharp") if (REPO / "ml-sharp" / "src").is_dir() else [])
     + [
         "app",
         "PIL",
@@ -45,6 +66,17 @@ hiddenimports = (
         "flask",
         "werkzeug",
         "jinja2",
+        "PySide6",
+        "PySide6.QtCore",
+        "PySide6.QtGui",
+        "PySide6.QtWidgets",
+        "pystereo_core.web_launch_dialog",
+        "pystereo_core.logging_config",
+        "pystereo_core.sharp_imports",
+        "imageio",
+        "imageio.v2",
+        "imageio.core",
+        "imageio.plugins",
     ]
 )
 
@@ -82,6 +114,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(ICON) if ICON is not None else None,
 )
 
 coll = COLLECT(
@@ -96,14 +129,12 @@ coll = COLLECT(
 )
 
 if sys.platform == "darwin":
-    _version_file = REPO / "pystereo_core" / "_version.py"
-    _ns: dict = {}
-    exec(_version_file.read_text(encoding="utf-8"), _ns)
-    _app_version = _ns["__version__"]
+    _app_version = (REPO / "version.txt").read_text(encoding="utf-8").strip()
 
     app = BUNDLE(
         coll,
         name="PyStereoWeb.app",
+        icon=str(ICON),
         bundle_identifier="io.pystereo.web",
         version=_app_version,
         info_plist={

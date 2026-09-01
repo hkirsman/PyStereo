@@ -20,9 +20,26 @@ echo Installing project dependencies into .venv...
 if errorlevel 1 exit /b 1
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 exit /b 1
+".venv\Scripts\python.exe" -m pip install -q "PySide6-Essentials>=6.7.0"
+if errorlevel 1 exit /b 1
+
+echo Initializing ml-sharp submodule (required for SHARP stereo methods^)...
+git submodule update --init ml-sharp
+if errorlevel 1 exit /b 1
+if not exist "ml-sharp\src\sharp" (
+  echo ERROR: ml-sharp submodule is missing at ml-sharp\src\sharp
+  echo Run: git submodule update --init ml-sharp
+  exit /b 1
+)
+".venv\Scripts\python.exe" -m pip install -e ./ml-sharp --no-deps
+if errorlevel 1 exit /b 1
 
 echo Installing PyInstaller into .venv (if needed^)...
 ".venv\Scripts\python.exe" -m pip install -q -U pyinstaller
+if errorlevel 1 exit /b 1
+
+echo Generating application icons...
+".venv\Scripts\python.exe" packaging\brand_icon.py
 if errorlevel 1 exit /b 1
 
 echo Building PyStereo (batch GUI + CLI^)...

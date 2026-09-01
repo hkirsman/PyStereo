@@ -25,7 +25,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 from flask import Flask, Response, jsonify, request, send_file
+from werkzeug.exceptions import HTTPException
 from PIL import Image
+
+from pystereo_core.logging_config import ensure_stderr_info_logging
+
+ensure_stderr_info_logging(log_file_name="pystereo-web.log")
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -117,6 +122,13 @@ def _configure_logger(name: str) -> logging.Logger:
 
 
 LOGGER = _configure_logger("pystereo-web")
+WEB_LOG_PATH: Path | None = None
+try:
+    from pystereo_core.logging_config import attach_file_handler, web_log_path
+
+    WEB_LOG_PATH = attach_file_handler(LOGGER, "pystereo-web.log") or web_log_path()
+except Exception:
+    WEB_LOG_PATH = None
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
 
@@ -136,6 +148,17 @@ def gui_log(message: str) -> None:
             _gui_log_sink(message)
         except Exception:
             pass
+
+
+def _inference_failed_payload() -> dict[str, str]:
+    """JSON body for failed inference; points at the on-disk log when available."""
+    if WEB_LOG_PATH is not None:
+        return {
+            "error": f"Inference failed. Check logs at {WEB_LOG_PATH}",
+            "log_path": str(WEB_LOG_PATH),
+            "log_url": "/api/logs",
+        }
+    return {"error": "Inference failed; check server logs."}
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +239,14 @@ def _suppress_flask_startup_noise() -> None:
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
+
+
+@app.errorhandler(Exception)
+def _log_unhandled_exception(exc: Exception) -> tuple[Any, int]:
+    if isinstance(exc, HTTPException):
+        return exc
+    LOGGER.exception("Unhandled request error")
+    return jsonify({"error": str(exc)}), 500
 
 
 @app.after_request
@@ -362,6 +393,25 @@ def api_health() -> Any:
 # ---------------------------------------------------------------------------
 
 
+@app.route("/api/logs", methods=["GET"])
+def download_logs() -> Any:
+    """Download the PyStereo web log file (for packaged apps with no console)."""
+    path = WEB_LOG_PATH
+    if path is None or not path.is_file():
+        return jsonify({"error": "Log file not available"}), 404
+    for handler in LOGGER.handlers:
+        try:
+            handler.flush()
+        except Exception:
+            pass
+    return send_file(
+        path,
+        mimetype="text/plain; charset=utf-8",
+        as_attachment=True,
+        download_name="pystereo-web.log",
+    )
+
+
 @app.route("/api/model/status", methods=["GET"])
 def api_model_status() -> Any:
     return jsonify(_attach_sharp_status(_model_status_payload()))
@@ -455,20 +505,24 @@ def api_model_delete() -> Any:
 @app.route("/api/depth-models", methods=["GET"])
 def api_depth_models() -> Any:
     """Return available depth models and their download status."""
-    from pystereo_core.depth import DEPTH_MODELS
-    from pystereo_core.download import get_download_manager
+    try:
+        from pystereo_core.depth import DEPTH_MODELS
+        from pystereo_core.download import get_download_manager
 
-    mgr = get_download_manager()
-    result = []
-    for size, info in DEPTH_MODELS.items():
-        result.append({
-            "size": size,
-            "name": info["name"],
-            "license": info["license"],
-            "size_mb": info["size_mb"],
-            "downloaded": mgr.is_depth_model_local(size),
-        })
-    return jsonify(result)
+        mgr = get_download_manager()
+        result = []
+        for size, info in DEPTH_MODELS.items():
+            result.append({
+                "size": size,
+                "name": info["name"],
+                "license": info["license"],
+                "size_mb": info["size_mb"],
+                "downloaded": mgr.is_depth_model_local(size),
+            })
+        return jsonify(result)
+    except Exception as exc:
+        LOGGER.exception("Failed to list depth models")
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/depth-models/download", methods=["POST"])
@@ -550,20 +604,28 @@ def api_settings_put() -> Any:
 
 @app.route("/api/stereo-methods", methods=["GET"])
 def api_stereo_methods() -> Any:
-    from pystereo_core.stereo.config import DEFAULT_METHOD
-    from pystereo_core.stereo.methods import list_methods_for_ui
+    try:
+        from pystereo_core.sharp_imports import is_sharp_code_available
+        from pystereo_core.stereo.config import DEFAULT_METHOD
+        from pystereo_core.stereo.methods import list_methods_for_ui
 
-    result = []
-    for name, cls in list_methods_for_ui():
-        result.append({
-            "name": name,
-            "label": cls.label,
-            "needs_depth": cls.needs_depth,
-            "deprecated": cls.deprecated,
-            "default": name == DEFAULT_METHOD,
-            "ui_info": cls.ui_info,
-        })
-    return jsonify(result)
+        sharp_code = is_sharp_code_available()
+        result = []
+        for name, cls in list_methods_for_ui():
+            if not cls.needs_depth and not sharp_code:
+                continue
+            result.append({
+                "name": name,
+                "label": cls.label,
+                "needs_depth": cls.needs_depth,
+                "deprecated": cls.deprecated,
+                "default": name == DEFAULT_METHOD,
+                "ui_info": cls.ui_info,
+            })
+        return jsonify(result)
+    except Exception as exc:
+        LOGGER.exception("Failed to list stereo methods")
+        return jsonify({"error": str(exc)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -651,7 +713,7 @@ def transform() -> Any:
     except Exception:
         LOGGER.exception("Inference failed for %s", name)
         gui_log(f"  Failed - {name} (see terminal for details)")
-        return jsonify({"error": "Inference failed"}), 500
+        return jsonify(_inference_failed_payload()), 500
 
     if max_pixels:
         from pystereo_core.stereo.fit import fit_to_pixel_budget
@@ -707,7 +769,20 @@ def api_generate() -> Any:
     gen_needs_depth = True
     try:
         from pystereo_core.stereo.methods import get_method as _get_stereo_method
-        gen_needs_depth = _get_stereo_method(effective_method).needs_depth
+
+        method_obj = _get_stereo_method(effective_method)
+        gen_needs_depth = method_obj.needs_depth
+        if not gen_needs_depth:
+            from pystereo_core.sharp_imports import is_sharp_code_available
+
+            if not is_sharp_code_available():
+                return jsonify({
+                    "error": (
+                        "This build does not include ml-sharp. "
+                        "Choose a depth-based method or rebuild with "
+                        "git submodule update --init ml-sharp."
+                    ),
+                }), 503
     except ValueError:
         pass
 
@@ -811,7 +886,7 @@ def api_generate() -> Any:
     except Exception:
         LOGGER.exception("Inference failed for %s", upload.filename)
         shutil.rmtree(result_dir, ignore_errors=True)
-        return jsonify({"error": "Inference failed; check server logs."}), 500
+        return jsonify(_inference_failed_payload()), 500
 
     elapsed = round(time.perf_counter() - t0, 3)
 

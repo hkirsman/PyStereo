@@ -9,9 +9,11 @@ def main() -> None:
     import logging
 
     from pystereo_core._version import __version__
+    from pystereo_core.logging_config import ensure_stderr_info_logging, ensure_stdio
 
-    logging.basicConfig(level=logging.INFO)
-    logging.getLogger("PyStereo").info("PyStereo %s", __version__)
+    ensure_stdio()
+    ensure_stderr_info_logging(log_file_name="pystereo-batch.log")
+    logging.getLogger("PyStereo").info("PyStereo batch %s", __version__)
 
     from pystereo_core.__main__ import main as batch_main
 

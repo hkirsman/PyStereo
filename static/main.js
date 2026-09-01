@@ -281,14 +281,17 @@ btnModelRemove.addEventListener("click", async () => {
 async function loadDepthModels() {
   try {
     const res = await fetch("/api/depth-models");
-    if (!res.ok) return;
+    if (!res.ok) {
+      console.error("depth-models failed", res.status, await res.text());
+      return;
+    }
     const models = await res.json();
     for (const m of models) {
       depthModelStatus[m.size] = m.downloaded;
     }
     updateDepthDownloadBtn();
-  } catch {
-    // Fall back to default
+  } catch (err) {
+    console.error("depth-models failed", err);
   }
 }
 
@@ -408,8 +411,8 @@ async function loadSettings() {
       maxDimSlider.value = s.max_dim;
       maxDimValue.textContent = s.max_dim;
     }
-    if (s.method) methodSelect.value = s.method;
-    else methodSelect.value = defaultMethodName;
+    if (s.method && methodMeta[s.method]) methodSelect.value = s.method;
+    else if (methodSelect.options.length) methodSelect.value = defaultMethodName;
     updateMethodInfo();
     updateDepthDownloadBtn();
   } catch {
@@ -579,8 +582,17 @@ btnRemoveSharp.addEventListener("click", async () => {
 async function loadMethods() {
   try {
     const res = await fetch("/api/stereo-methods");
-    if (!res.ok) return;
+    if (!res.ok) {
+      const text = await res.text();
+      setStatus("Failed to load stereo methods (" + res.status + "). Restart PyStereo Web.", false, true);
+      console.error("stereo-methods failed", res.status, text);
+      return;
+    }
     const methods = await res.json();
+    if (!Array.isArray(methods) || methods.length === 0) {
+      setStatus("No stereo methods available in this build.", false, true);
+      return;
+    }
     methodSelect.replaceChildren();
     for (const m of methods) {
       methodMeta[m.name] = m;
@@ -592,8 +604,9 @@ async function loadMethods() {
     }
     methodSelect.value = defaultMethodName;
     updateMethodInfo();
-  } catch {
-    // Methods will use default
+  } catch (err) {
+    setStatus("Failed to load stereo methods: " + err.message, false, true);
+    console.error("stereo-methods failed", err);
   }
 }
 

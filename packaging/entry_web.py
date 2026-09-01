@@ -9,9 +9,13 @@ import multiprocessing
 def main() -> None:
     import argparse
 
+    from pystereo_core.logging_config import ensure_stdio
+
+    # Before any import that may touch logging or torch progress bars.
+    ensure_stdio()
     logging.basicConfig(level=logging.INFO)
     from pystereo_core._version import __version__
-    from app import app
+    from app import LOGGER, OUTPUTS_DIR, app
 
     parser = argparse.ArgumentParser(description="PyStereo web server")
     parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
@@ -21,13 +25,39 @@ def main() -> None:
         action="store_true",
         help="No launch dialog or browser; log the URL and run the server only",
     )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Show the launch dialog but do not open the browser automatically",
+    )
     args = parser.parse_args()
 
-    logging.getLogger("PyStereo").info(
-        "PyStereo web %s - http://%s:%d", __version__, args.host, args.port
-    )
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    LOGGER.info("PyStereo web %s - http://%s:%d", __version__, args.host, args.port)
+    from app import WEB_LOG_PATH
 
-    app.run(host=args.host, port=args.port, debug=False, threaded=True)
+    if WEB_LOG_PATH is not None:
+        LOGGER.info("Log file: %s", WEB_LOG_PATH)
+
+    def _start_server() -> None:
+        app.run(host=args.host, port=args.port, debug=False, threaded=True)
+
+    if args.headless:
+        from pystereo_core.web_launch_dialog import ensure_port_available
+
+        ensure_port_available(args.host, args.port, gui=False)
+        _start_server()
+        return
+
+    from pystereo_core.web_launch_dialog import run_server_with_launch_dialog
+
+    run_server_with_launch_dialog(
+        host=args.host,
+        port=args.port,
+        version=__version__,
+        start_server=_start_server,
+        open_browser=not args.no_browser,
+    )
 
 
 if __name__ == "__main__":
