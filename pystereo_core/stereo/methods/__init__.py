@@ -32,6 +32,7 @@ def _populate() -> None:
         SharpSplatMethod,
         SharpTaichiMethod,
     )
+    from pystereo_core.stereo.methods.sharp_taichi_full import SharpTaichiFullMethod
 
     _REGISTRY["per_eye_inpaint"] = PerEyeInpaintMethod
     _REGISTRY["fullres_warp"] = FullResWarpMethod
@@ -50,12 +51,14 @@ def _populate() -> None:
     _REGISTRY["sharp_depth"] = SharpDepthMethod
     _REGISTRY["sharp_mesh"] = SharpMeshMethod
     _REGISTRY["sharp_taichi"] = SharpTaichiMethod
+    _REGISTRY["sharp_taichi_full"] = SharpTaichiFullMethod
 
 
 # Active methods first, all deprecated last.
 METHOD_UI_ORDER: tuple[str, ...] = (
     "per_eye_inpaint",
     "sharp_taichi",
+    "sharp_taichi_full",
     "sharp_splat",
     "sharp_detail",
     "sharp_hires",
