@@ -13,8 +13,10 @@ and composes the final SBS image.
 
 from __future__ import annotations
 
+import copy
 import logging
 import time
+from dataclasses import replace as dc_replace
 from typing import Any, NamedTuple
 
 import cv2
@@ -54,6 +56,21 @@ class WarpPreviewResult(NamedTuple):
     mask_sbs: Image.Image
 
 
+class _SharedModels:
+    """Lazily loaded model instances shared by a pipeline and its derivatives.
+
+    Kept in one holder (instead of plain attributes) so :meth:`StereoPipeline.derive`
+    can hand out a pipeline with different settings that still reuses the
+    resident BiRefNet and inpainter - loading either costs several seconds
+    and was happening on every web request.
+    """
+
+    def __init__(self, inpainter: InpaintBackend) -> None:
+        self.inpainter = inpainter
+        self.segmenter: ForegroundSegmenter | None = None
+        self.methods: dict[str, BaseStereoMethod] = {}
+
+
 class StereoPipeline:
     """Production 2D → SBS stereo converter.
 
@@ -61,6 +78,8 @@ class StereoPipeline:
 
     The active method is determined by ``settings.stereo_method`` and can
     be overridden per-call via the ``method`` parameter on :meth:`synthesize`.
+    Per-request setting tweaks should go through :meth:`derive` rather than
+    a fresh pipeline, so loaded models are reused.
     """
 
     def __init__(
@@ -69,14 +88,52 @@ class StereoPipeline:
         inpainter: InpaintBackend | None = None,
     ) -> None:
         self.settings = settings or StereoSettings.from_env()
-        self._inpainter = inpainter or create_inpaint_backend(self.settings.inpaint_backend)
-        self._segmenter: ForegroundSegmenter | None = None
-        self._methods: dict[str, BaseStereoMethod] = {}
+        self._shared = _SharedModels(
+            inpainter or create_inpaint_backend(self.settings.inpaint_backend),
+        )
+
+    @property
+    def _inpainter(self) -> InpaintBackend:
+        return self._shared.inpainter
+
+    @property
+    def _segmenter(self) -> ForegroundSegmenter | None:
+        return self._shared.segmenter
+
+    @_segmenter.setter
+    def _segmenter(self, value: ForegroundSegmenter | None) -> None:
+        self._shared.segmenter = value
+
+    @property
+    def _methods(self) -> dict[str, BaseStereoMethod]:
+        return self._shared.methods
+
+    def derive(self, **overrides: Any) -> StereoPipeline:
+        """Return a pipeline with ``settings`` fields replaced by *overrides*.
+
+        The result shares this pipeline's loaded models (segmenter,
+        inpainter, method instances), so it is cheap to create per request.
+        ``inpaint_backend`` cannot be overridden here - the inpainter is
+        shared, not rebuilt.
+        """
+        if "inpaint_backend" in overrides:
+            raise ValueError("derive() cannot change inpaint_backend; build a new StereoPipeline")
+        clone = copy.copy(self)
+        clone.settings = dc_replace(self.settings, **overrides)
+        return clone
 
     def _ensure_segmenter(self) -> ForegroundSegmenter:
         if self._segmenter is None:
             self._segmenter = ForegroundSegmenter()
         return self._segmenter
+
+    def segmenter_loaded(self) -> bool:
+        """True while BiRefNet weights are resident (for UI load notes)."""
+        return getattr(self._segmenter, "_model", None) is not None
+
+    @staticmethod
+    def _load_note(loaded_before: bool, loaded_after: bool) -> str:
+        return " (model load)" if loaded_after and not loaded_before else ""
 
     def unload_models(self) -> list[str]:
         """Drop the segmenter and inpainter weights held by this pipeline.
@@ -86,7 +143,7 @@ class StereoPipeline:
         """
         released: list[str] = []
         if self._segmenter is not None:
-            was_loaded = getattr(self._segmenter, "_model", None) is not None
+            was_loaded = self.segmenter_loaded()
             self._segmenter.unload()
             self._segmenter = None
             if was_loaded:
@@ -221,6 +278,7 @@ class StereoPipeline:
         rgb = image.convert("RGB")
         fg_mask: np.ndarray | None = None
         t0 = time.perf_counter()
+        seg_loaded = self.segmenter_loaded()
         try:
             segmenter = self._ensure_segmenter()
             fg_mask = segmenter.segment(
@@ -232,7 +290,11 @@ class StereoPipeline:
                 "depth percentile fallback",
                 exc,
             )
-        record_step(intermediates, "Segmentation", time.perf_counter() - t0)
+        record_step(
+            intermediates,
+            "Segmentation" + self._load_note(seg_loaded, self.segmenter_loaded()),
+            time.perf_counter() - t0,
+        )
 
         logger.info("Stereo [%s]: needs_depth=False, skipping depth pipeline", method_name)
         left, right = stereo_method.synthesize(rgb, fg_mask, self.settings, intermediates)
@@ -271,18 +333,28 @@ class StereoPipeline:
             return self._synthesize_no_depth(image, stereo_method, method_name, intermediates)
 
         t0 = time.perf_counter()
+        seg_loaded = self.segmenter_loaded()
         p = self._preprocess(
             image, depth_map,
             divergence_ratio=divergence_ratio, method=method,
         )
-        record_step(intermediates, "Preprocess (heal + filter)", time.perf_counter() - t0)
+        record_step(
+            intermediates,
+            "Preprocess (heal + filter)" + self._load_note(seg_loaded, self.segmenter_loaded()),
+            time.perf_counter() - t0,
+        )
 
         t0 = time.perf_counter()
+        inpaint_loaded = self._inpainter.is_loaded()
         left, right = p.stereo_method.warp_and_fill(
             p.rgb_arr, p.depth_f32, p.max_disp, p.fg_mask,
             self.settings, self._inpainter,
         )
-        record_step(intermediates, "Warp + inpaint", time.perf_counter() - t0)
+        record_step(
+            intermediates,
+            "Warp + inpaint" + self._load_note(inpaint_loaded, self._inpainter.is_loaded()),
+            time.perf_counter() - t0,
+        )
 
         self._release_gpu_cache()
 

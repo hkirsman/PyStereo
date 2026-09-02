@@ -62,7 +62,7 @@ SHARP methods skip depth estimation entirely - Apple SHARP predicts a 3D Gaussia
 | `pystereo_core/__main__.py` | CLI entry point + Qt GUI launcher |
 | `pystereo_core/registry.py` | Thread-safe AI model registry (singleton, keyed by capability) |
 | `pystereo_core/download.py` | Background weight download manager (HuggingFace Hub + direct URLs) |
-| `pystereo_core/stereo/pipeline.py` | Orchestrates preprocessing + method dispatch + SBS composition |
+| `pystereo_core/stereo/pipeline.py` | Orchestrates preprocessing + method dispatch + SBS composition; `derive(**overrides)` gives per-request settings without reloading BiRefNet / LaMa |
 | `pystereo_core/stereo/config.py` | `StereoSettings` dataclass, env-var config, method defaults |
 | `pystereo_core/stereo/methods/` | Pluggable stereo methods (one file per method, auto-registered) |
 | `pystereo_core/stereo/methods/base.py` | `BaseStereoMethod` ABC - `warp_and_fill()` or `synthesize()` |

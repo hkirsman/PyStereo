@@ -947,12 +947,7 @@ def transform() -> Any:
                 overrides["sharp_disk_cache"] = False
 
             if overrides:
-                from dataclasses import replace as dc_replace
-
-                from pystereo_core.stereo.pipeline import StereoPipeline
-
-                settings = dc_replace(pipeline.settings, **overrides)
-                local_pipeline = StereoPipeline(settings=settings)
+                local_pipeline = pipeline.derive(**overrides)
                 sbs_img = local_pipeline.synthesize_with_depth_estimator(
                     rgb_pil, depth_estimator, method=method_override,
                 )
@@ -1071,11 +1066,7 @@ def api_generate() -> Any:
             if pipeline.settings.sharp_disk_cache == disable_cache:
                 overrides["sharp_disk_cache"] = not disable_cache
             if overrides:
-                from dataclasses import replace as dc_replace
-
-                from pystereo_core.stereo.pipeline import StereoPipeline
-
-                active_pipeline = StereoPipeline(settings=dc_replace(pipeline.settings, **overrides))
+                active_pipeline = pipeline.derive(**overrides)
             else:
                 active_pipeline = pipeline
 
@@ -1116,6 +1107,7 @@ def api_generate() -> Any:
 
                 # Warp preview (pre-inpaint intermediates)
                 t_step = time.perf_counter()
+                seg_loaded = active_pipeline.segmenter_loaded()
                 warp_result = active_pipeline.warp_preview(
                     rgb_pil, depth_f32, method=method_override,
                 )
@@ -1124,8 +1116,13 @@ def api_generate() -> Any:
                         str(result_dir / "warp.jpg"), quality=95,
                     )
                     warp_result.mask_sbs.save(str(result_dir / "mask.png"))
+                    load_note = (
+                        " (model load)"
+                        if active_pipeline.segmenter_loaded() and not seg_loaded
+                        else ""
+                    )
                     record_step(
-                        sharp_intermediates, "Warp preview",
+                        sharp_intermediates, "Warp preview" + load_note,
                         time.perf_counter() - t_step,
                     )
 
