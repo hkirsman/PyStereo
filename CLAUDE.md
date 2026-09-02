@@ -52,7 +52,7 @@ No project test suite yet. Verify changes by running the web UI (`python app.py`
 4. **Inpainting** - LaMa (default) or AOT-GAN for disocclusion fill (`stereo/inpaint.py`)
 5. **SBS assembly** - left + right eye side-by-side JPEG (`stereo/pipeline.py`)
 
-SHARP methods skip depth estimation entirely - Apple SHARP predicts a 3D Gaussian splat and renders from two virtual cameras (`stereo/sharp_predict.py`, `stereo/splat_render.py`, `stereo/taichi_render.py`).
+SHARP methods skip depth estimation entirely - Apple SHARP predicts a 3D Gaussian splat and renders from two virtual cameras (`stereo/sharp_predict.py`, `stereo/splat_render.py`, `stereo/taichi_render.py`). The predictor stays resident between photos and unloads after 60 s idle (`PYSTEREO_SHARP_IDLE_S`). The `*_full` methods render entirely in Taichi - projection and compositing, no torch in the render path (`stereo/taichi_full.py`, `stereo/_taichi_full_kernels.py`).
 
 ### Key modules
 
@@ -66,9 +66,12 @@ SHARP methods skip depth estimation entirely - Apple SHARP predicts a 3D Gaussia
 | `pystereo_core/stereo/config.py` | `StereoSettings` dataclass, env-var config, method defaults |
 | `pystereo_core/stereo/methods/` | Pluggable stereo methods (one file per method, auto-registered) |
 | `pystereo_core/stereo/methods/base.py` | `BaseStereoMethod` ABC - `warp_and_fill()` or `synthesize()` |
+| `pystereo_core/stereo/taichi_full.py` | Torch-free SHARP splat renderer (Taichi projection + compositing) |
+| `pystereo_core/stereo/timing.py` | Per-step timing collection (`record_step` into `intermediates["timings"]`) |
 | `static/` | Web UI frontend (HTML/JS/CSS) |
 | `packaging/` | PyInstaller specs + entry points |
 | `ml-sharp/` | Git submodule - Apple SHARP (research-only license, never bundled) |
+| `experiments/` | Standalone proof-of-concept code, never imported by `pystereo_core` |
 
 ### Method registry
 
@@ -76,9 +79,11 @@ Methods live in `pystereo_core/stereo/methods/`, one file per method. Each subcl
 
 Depth-map methods implement `warp_and_fill()`. SHARP methods set `needs_depth = False` and implement `synthesize()` instead.
 
+Methods report per-step timings via `stereo/timing.py:record_step` into the `intermediates` dict (shown in the web UI stages panel); SHARP methods also set `intermediates["render_backend"]` to `"taichi"` or `"torch"` so the UI can say which renderer actually ran.
+
 ### Settings
 
-User preferences persist in `settings.json` (gitignored). `StereoSettings` is a frozen dataclass with env-var overrides (`PYSTEREO_METHOD`, `PYSTEREO_INPAINT`, `PYSTEREO_MAX_DIM`, etc.) and per-method `SETTING_OVERRIDES`.
+User preferences persist in `settings.json` (gitignored). `StereoSettings` is a frozen dataclass with env-var overrides (`PYSTEREO_METHOD`, `PYSTEREO_INPAINT`, `PYSTEREO_MAX_DIM`, etc.) and per-method `SETTING_OVERRIDES`. `PYSTEREO_SHARP_IDLE_S` (default 60) sets how long the resident SHARP predictor survives idle before unloading.
 
 ### Model weights
 

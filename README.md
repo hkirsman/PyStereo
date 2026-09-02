@@ -151,6 +151,8 @@ the disocclusion band beside depth edges is generated.
 | `sharp_mesh` | SHARP Mesh | SHARP splat | Renders SHARP's depth as a forward-splatted mesh. Triangles fill small gaps naturally; large disocclusions get stretched from neighbours (no AI inpainting). Sharp edges at depth boundaries. Research-only license. |
 | `sharp_splat` | SHARP Splat | SHARP splat | 3D Gaussian splat via Apple SHARP, rendered from two virtual cameras 63 mm apart. True parallax for every object, no inpainting step. Slightly soft (SHARP works at 1536^2). Research-only license. |
 | `sharp_taichi` | SHARP Taichi | SHARP splat | Same EWA Gaussian splatting as sharp_splat but compositing runs on Metal/GPU via taichi (5-10x faster). Falls back to the torch renderer if taichi is not installed. Research-only license. |
+| `sharp_splat_full` | SHARP Splat (full taichi) | SHARP splat | Same z-buffer EWA look as sharp_splat, but the entire render path - projection and compositing - runs as Taichi kernels, no torch in the renderer. Both eyes render in about a second. Falls back to torch when taichi is unavailable. Research-only license. |
+| `sharp_alpha_full` | SHARP Alpha (full taichi) | SHARP splat | Depth-sorted alpha compositing (the SHARP Alpha look) at standard 1536 resolution, pure splat colour, with the whole render path in Taichi. Fastest render step of the SHARP methods. Falls back to torch when taichi is unavailable. Research-only license. |
 | `sharp_detail` | SHARP Detail | SHARP splat | Same SHARP splat geometry as sharp_splat, but colour is re-sampled from the original photo wherever the original camera could see that surface (~99% of pixels). Full photo sharpness, same 3D geometry. Research-only license. |
 | `sharp_hires` | SHARP Hi-res Detail | SHARP splat | sharp_detail with SHARP run at 2688^2 instead of 1536^2 (1344^2 Gaussian grid, 3.6 M Gaussians): tighter silhouettes and a visibly sharper disocclusion band. ~5x slower prediction (about 95 s on an M-series Mac), 3x memory. Experimental - outside the model's training resolution. Research-only license. |
 | `sharp_alpha` | SHARP Alpha | SHARP splat | sharp_hires rendered with proper 3DGS compositing: Gaussians depth-sorted per pixel and alpha-blended front to back, median depth. Cleanest silhouettes and sharpest disocclusion band of the SHARP methods. Slow: about 2 min per photo on an M-series Mac (the per-pixel sort runs in torch). Research-only license. |
@@ -163,8 +165,10 @@ with a pure-torch renderer (~2 min extra). `sharp_alpha*` use proper 3DGS
 compositing (Gaussians depth-sorted per pixel, alpha-blended front to
 back, median depth); the other SHARP methods use a faster z-buffer
 approximation that is softer at silhouettes. Taichi 1.7 has wheels for
-Python 3.9-3.13 only; on a 3.14 venv the taichi methods silently use the
-torch renderer.
+Python 3.9-3.13 only; on a 3.14 venv the taichi methods use the torch
+renderer instead - the result line in the web UI shows which renderer
+actually ran. The SHARP predictor stays loaded between photos (about
+8 s saved per photo after the first) and unloads after 60 s idle.
 
 The prototypes these came from, with side-by-side outputs, are in
 `../stereo-experiments/README.md` (exps 13-21).

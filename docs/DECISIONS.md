@@ -24,3 +24,19 @@
 **Why not just document them?** A prose description of "we tried anisotropic fill and it produced streaks at depth edges" is less useful than being able to select the method in the UI, see the streaks yourself, and understand why the current approach exists. The code is the documentation.
 
 **Cost:** Each method is a single file (50-300 lines), auto-discovered by the method registry. They add no runtime overhead when not selected and no maintenance burden since they have no reason to change.
+
+## SHARP predictor stays resident between photos (2026-09-02)
+
+**Decision:** Cache the SHARP predictor in a module global after the first prediction and unload it after 60 s without use (`PYSTEREO_SHARP_IDLE_S` overrides).
+
+**Context:** `predict_gaussians` used to load the 2.8 GB checkpoint and delete the model on every photo, adding ~6-8 s per prediction. sharp-local (the sibling repo wrapping the same model) loads it once per process, which made it look faster for consecutive photos even though raw inference speed is identical (~11 s at 1536 on an M4).
+
+**Trade-off:** A resident predictor holds ~3 GB of unified memory. The idle timer gives both properties: consecutive photos (batch runs, a user iterating on settings) pay the load once, while a machine left idle gets the memory back after a minute. A timer that fires while a prediction is running reschedules itself instead of unloading mid-inference.
+
+## Full-taichi render path duplicates constants deliberately (2026-09-02)
+
+**Decision:** `stereo/taichi_full.py` (the torch-free renderer behind the `*_full` methods) re-declares the render constants from `splat_render.py` instead of importing them.
+
+**Context:** `splat_render.py` imports torch at module level. The point of the full-taichi path is a render path with no torch in it - usable later in a torch-free packaged viewer. Importing the constants would silently drag torch back in. The mirror is marked "keep in sync" in both files; the compositing kernels themselves are shared (`_taichi_kernels.py`), so outputs stay pixel-identical to the torch-projection paths.
+
+**Reminder for frozen builds:** Taichi compiles kernels by reading Python source, so every kernel module must be at module scope and listed in the PyInstaller spec `datas` (`_taichi_kernels.py`, `_taichi_full_kernels.py`). A new kernels file that is not added to both specs will silently fall back to torch in the packaged app.
