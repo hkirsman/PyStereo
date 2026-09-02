@@ -49,6 +49,7 @@ const stageWarpImg = $("#stageWarpImg");
 const stageSbs = $("#stageSbs");
 const stageSbsImg = $("#stageSbsImg");
 const stageTiming = $("#stageTiming");
+const stageSteps = $("#stageSteps");
 
 const lightbox = $("#lightbox");
 const lightboxImg = $("#lightboxImg");
@@ -698,6 +699,8 @@ btnGenerate.addEventListener("click", async () => {
   stageWarp.hidden = true;
   stageSbs.hidden = true;
   stageTiming.textContent = "";
+  stageSteps.innerHTML = "";
+  stageSteps.hidden = true;
 
   setStatus(needsModel ? "Running depth estimation + stereo synthesis..." : "Running SHARP stereo synthesis...", true, false);
 
@@ -748,11 +751,25 @@ btnGenerate.addEventListener("click", async () => {
       stageSbs.hidden = false;
     }
 
+    // Per-step timing breakdown
+    if (Array.isArray(data.timings) && data.timings.length) {
+      for (const step of data.timings) {
+        const li = document.createElement("li");
+        const label = document.createElement("span");
+        label.textContent = step.label;
+        const secs = document.createElement("span");
+        secs.textContent = step.seconds.toFixed(2) + "s";
+        li.append(label, secs);
+        stageSteps.appendChild(li);
+      }
+      stageSteps.hidden = false;
+    }
+
     const elapsed = data.elapsed_seconds != null ? data.elapsed_seconds.toFixed(1) : "?";
     const dims = data.width && data.height ? data.width + "x" + data.height : "";
     const methodUsed = data.method || "default";
     stageTiming.textContent =
-      "Method: " + methodUsed + " - " + dims + " - " + elapsed + "s";
+      "Method: " + methodUsed + " - " + dims + " - " + elapsed + "s total";
 
     setStatus("Done (" + elapsed + "s)", false, false);
   } catch (err) {

@@ -19,6 +19,7 @@ methods are opt-in and clearly labelled non-commercial.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, ClassVar
 
 import numpy as np
@@ -28,6 +29,7 @@ from pystereo_core.stereo.config import StereoSettings
 from pystereo_core.stereo.inpaint import InpaintBackend
 from pystereo_core.stereo.methods.base import BaseStereoMethod
 from pystereo_core.stereo.splat_render import RenderMode
+from pystereo_core.stereo.timing import record_step
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,9 @@ class _SharpBase(BaseStereoMethod):
         from pystereo_core.stereo.sharp_predict import predict_gaussians
         from pystereo_core.stereo.splat_render import render_stereo
 
+        t0 = time.perf_counter()
         npz_path = predict_gaussians(image, internal=self._internal)
+        record_step(intermediates, "SHARP prediction", time.perf_counter() - t0)
 
         subject_mask: np.ndarray | None = None
         if fg_mask is not None:
@@ -77,6 +81,7 @@ class _SharpBase(BaseStereoMethod):
         if self._detail_transfer:
             photo = np.asarray(image.convert("RGB"))
 
+        t0 = time.perf_counter()
         result = render_stereo(
             str(npz_path),
             baseline_m=BASELINE_M,
@@ -85,6 +90,7 @@ class _SharpBase(BaseStereoMethod):
             photo=photo,
             mode=self._render_mode,
         )
+        record_step(intermediates, "Splat render", time.perf_counter() - t0)
 
         if intermediates is not None:
             if "center_rgb" in result:
@@ -234,9 +240,13 @@ class SharpDepthMethod(_SharpBase):
         from pystereo_core.stereo.sharp_predict import predict_gaussians
         from pystereo_core.stereo.splat_render import SharpScene, linear_to_srgb
 
+        t0 = time.perf_counter()
         npz_path = predict_gaussians(image)
+        record_step(intermediates, "SHARP prediction", time.perf_counter() - t0)
+        t0 = time.perf_counter()
         scene = SharpScene(str(npz_path))
         _, center_depth, _ = scene.render(0.0, 0.0)
+        record_step(intermediates, "Depth render", time.perf_counter() - t0)
 
         valid = np.isfinite(center_depth) & (center_depth > 0)
         inv_d = np.zeros_like(center_depth)
@@ -256,7 +266,9 @@ class SharpDepthMethod(_SharpBase):
         from pystereo_core.stereo.pipeline import StereoPipeline
 
         pipeline = StereoPipeline(settings=settings)
-        sbs = pipeline.synthesize(image, depth_01, method="per_eye_inpaint")
+        sbs = pipeline.synthesize(
+            image, depth_01, method="per_eye_inpaint", intermediates=intermediates,
+        )
 
         w = sbs.width // 2
         left = np.array(sbs.crop((0, 0, w, sbs.height)))
@@ -293,10 +305,14 @@ class SharpMeshMethod(_SharpBase):
         from pystereo_core.stereo.sharp_predict import predict_gaussians
         from pystereo_core.stereo.splat_render import SharpScene
 
+        t0 = time.perf_counter()
         npz_path = predict_gaussians(image)
+        record_step(intermediates, "SHARP prediction", time.perf_counter() - t0)
+        t0 = time.perf_counter()
         scene = SharpScene(str(npz_path))
 
         _, center_depth, _ = scene.render(0.0, 0.0)
+        record_step(intermediates, "Depth render", time.perf_counter() - t0)
 
         subject_mask: np.ndarray | None = None
         if fg_mask is not None:
@@ -308,11 +324,13 @@ class SharpMeshMethod(_SharpBase):
             converge_m = float(np.nanpercentile(center_depth, 10))
 
         rgb = np.asarray(image.convert("RGB"))
+        t0 = time.perf_counter()
         result = render_mesh_stereo(
             rgb, center_depth, scene.f_px,
             baseline_m=BASELINE_M,
             converge_m=converge_m,
         )
+        record_step(intermediates, "Mesh render", time.perf_counter() - t0)
 
         if intermediates is not None:
             valid = np.isfinite(center_depth) & (center_depth > 0)
@@ -365,7 +383,10 @@ class SharpTaichiMethod(_SharpBase):
         )
         from pystereo_core.stereo.taichi_render import select_ewa_compositor
 
+        t0 = time.perf_counter()
         npz_path = predict_gaussians(image)
+        record_step(intermediates, "SHARP prediction", time.perf_counter() - t0)
+        t_render = time.perf_counter()
         scene = SharpScene(str(npz_path))
 
         composite = select_ewa_compositor()
@@ -390,6 +411,7 @@ class SharpTaichiMethod(_SharpBase):
 
         l_rgb, l_d, l_h = composite(l_proj)
         r_rgb, r_d, r_h = composite(r_proj)
+        record_step(intermediates, "Splat render", time.perf_counter() - t_render)
 
         def finish(rgb: np.ndarray, holes: np.ndarray) -> np.ndarray:
             img = (linear_to_srgb(rgb) * 255).astype(np.uint8)

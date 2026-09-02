@@ -14,6 +14,7 @@ and composes the final SBS image.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, NamedTuple
 
 import cv2
@@ -27,6 +28,7 @@ from pystereo_core.stereo.inpaint import InpaintBackend, create_inpaint_backend
 from pystereo_core.stereo.methods import available_methods, get_method
 from pystereo_core.stereo.methods.base import BaseStereoMethod
 from pystereo_core.stereo.segment import ForegroundSegmenter
+from pystereo_core.stereo.timing import record_step
 from pystereo_core.stereo.warp import adaptive_max_disparity
 
 logger = logging.getLogger(__name__)
@@ -200,6 +202,7 @@ class StereoPipeline:
         """Bypass depth preprocessing for methods that predict their own 3D."""
         rgb = image.convert("RGB")
         fg_mask: np.ndarray | None = None
+        t0 = time.perf_counter()
         try:
             segmenter = self._ensure_segmenter()
             fg_mask = segmenter.segment(
@@ -211,6 +214,7 @@ class StereoPipeline:
                 "depth percentile fallback",
                 exc,
             )
+        record_step(intermediates, "Segmentation", time.perf_counter() - t0)
 
         logger.info("Stereo [%s]: needs_depth=False, skipping depth pipeline", method_name)
         left, right = stereo_method.synthesize(rgb, fg_mask, self.settings, intermediates)
@@ -248,15 +252,19 @@ class StereoPipeline:
         if not stereo_method.needs_depth:
             return self._synthesize_no_depth(image, stereo_method, method_name, intermediates)
 
+        t0 = time.perf_counter()
         p = self._preprocess(
             image, depth_map,
             divergence_ratio=divergence_ratio, method=method,
         )
+        record_step(intermediates, "Preprocess (heal + filter)", time.perf_counter() - t0)
 
+        t0 = time.perf_counter()
         left, right = p.stereo_method.warp_and_fill(
             p.rgb_arr, p.depth_f32, p.max_disp, p.fg_mask,
             self.settings, self._inpainter,
         )
+        record_step(intermediates, "Warp + inpaint", time.perf_counter() - t0)
 
         self._release_gpu_cache()
 

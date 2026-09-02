@@ -836,6 +836,8 @@ def api_generate() -> Any:
             else:
                 active_pipeline = pipeline
 
+            from pystereo_core.stereo.timing import record_step
+
             warp_result = None
             sharp_intermediates: dict[str, Any] = {}
             if not gen_needs_depth:
@@ -852,6 +854,7 @@ def api_generate() -> Any:
                 # Generate depth map
                 import numpy as np
 
+                t_step = time.perf_counter()
                 if hasattr(depth_estimator, "process_raw"):
                     depth_f32 = depth_estimator.process_raw(rgb_pil)
                     depth_u8 = (depth_f32 * 255).clip(0, 255).astype(np.uint8)
@@ -861,10 +864,15 @@ def api_generate() -> Any:
                     depth_f32 = np.array(
                         depth_pil.convert("L"), dtype=np.float32,
                     ) / 255.0
+                record_step(
+                    sharp_intermediates, "Depth estimation",
+                    time.perf_counter() - t_step,
+                )
 
                 depth_pil.save(str(result_dir / "depth.png"))
 
                 # Warp preview (pre-inpaint intermediates)
+                t_step = time.perf_counter()
                 warp_result = active_pipeline.warp_preview(
                     rgb_pil, depth_f32, method=method_override,
                 )
@@ -873,10 +881,15 @@ def api_generate() -> Any:
                         str(result_dir / "warp.jpg"), quality=95,
                     )
                     warp_result.mask_sbs.save(str(result_dir / "mask.png"))
+                    record_step(
+                        sharp_intermediates, "Warp preview",
+                        time.perf_counter() - t_step,
+                    )
 
                 # Generate SBS
                 sbs_img = active_pipeline.synthesize(
                     rgb_pil, depth_f32, method=method_override,
+                    intermediates=sharp_intermediates,
                 )
             sbs_img.save(str(result_dir / "sbs.jpg"), quality=95)
 
@@ -901,6 +914,10 @@ def api_generate() -> Any:
         return jsonify(_inference_failed_payload()), 500
 
     elapsed = round(time.perf_counter() - t0, 3)
+    step_timings = [
+        {"label": label, "seconds": seconds}
+        for label, seconds in sharp_intermediates.get("timings", [])
+    ]
 
     meta: dict[str, Any] = {
         "id": result_id,
@@ -910,6 +927,7 @@ def api_generate() -> Any:
         "height": h,
         "method": effective_method,
         "elapsed_seconds": elapsed,
+        "timings": step_timings,
     }
     (result_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
@@ -921,6 +939,7 @@ def api_generate() -> Any:
         "width": w,
         "height": h,
         "elapsed_seconds": elapsed,
+        "timings": step_timings,
     }
     if gen_needs_depth:
         resp["depth_url"] = f"/api/results/{result_id}/depth.png"

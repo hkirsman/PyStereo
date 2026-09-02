@@ -18,6 +18,7 @@ is unavailable.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, ClassVar
 
 import numpy as np
@@ -26,6 +27,7 @@ from PIL import Image
 from pystereo_core.stereo.config import StereoSettings
 from pystereo_core.stereo.methods.sharp_splat import BASELINE_M, _SharpBase
 from pystereo_core.stereo.splat_render import RenderMode
+from pystereo_core.stereo.timing import record_step
 
 logger = logging.getLogger(__name__)
 
@@ -61,12 +63,15 @@ class _FullTaichiBase(_SharpBase):
 
         from pystereo_core.stereo.sharp_predict import predict_gaussians
 
+        t0 = time.perf_counter()
         npz_path = predict_gaussians(image, internal=self._internal)
+        record_step(intermediates, "SHARP prediction", time.perf_counter() - t0)
 
         subject_mask: np.ndarray | None = None
         if fg_mask is not None:
             subject_mask = fg_mask > 0.5
 
+        t0 = time.perf_counter()
         result = render_stereo_taichi(
             str(npz_path),
             baseline_m=BASELINE_M,
@@ -74,6 +79,7 @@ class _FullTaichiBase(_SharpBase):
             subject_mask=subject_mask,
             mode=self._taichi_mode,
         )
+        record_step(intermediates, "Splat render (taichi)", time.perf_counter() - t0)
 
         if intermediates is not None:
             intermediates["splat_rgb"] = result["center_rgb"]

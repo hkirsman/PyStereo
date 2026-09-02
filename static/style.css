@@ -580,6 +580,25 @@ body.model-gate-active .app-shell > .layout {
   cursor: zoom-in;
 }
 
+.stage-steps {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.75rem;
+  list-style: none;
+  background: #0d0d0d;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.stage-steps li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.15rem 0;
+}
+
 .stage-timing {
   margin: 0.5rem 0 0;
   font-size: 0.72rem;
