@@ -61,11 +61,17 @@ class _FullTaichiBase(_SharpBase):
             )
             return super().synthesize(image, fg_mask, settings, intermediates)
 
-        from pystereo_core.stereo.sharp_predict import predict_gaussians
+        from pystereo_core.stereo.sharp_predict import cache_note, predict_gaussians
 
         t0 = time.perf_counter()
-        npz_path = predict_gaussians(image, internal=self._internal)
-        record_step(intermediates, "SHARP prediction", time.perf_counter() - t0)
+        npz_path = predict_gaussians(
+            image, internal=self._internal,
+            use_cache=settings.sharp_disk_cache, intermediates=intermediates,
+        )
+        record_step(
+            intermediates, "SHARP prediction" + cache_note(intermediates),
+            time.perf_counter() - t0,
+        )
 
         subject_mask: np.ndarray | None = None
         if fg_mask is not None:

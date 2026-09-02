@@ -78,6 +78,24 @@ class StereoPipeline:
             self._segmenter = ForegroundSegmenter()
         return self._segmenter
 
+    def unload_models(self) -> list[str]:
+        """Drop the segmenter and inpainter weights held by this pipeline.
+
+        Both reload lazily on the next use. Returns the names of what was
+        actually resident, for UI feedback.
+        """
+        released: list[str] = []
+        if self._segmenter is not None:
+            was_loaded = getattr(self._segmenter, "_model", None) is not None
+            self._segmenter.unload()
+            self._segmenter = None
+            if was_loaded:
+                released.append("segmenter")
+        if self._inpainter.is_loaded():
+            self._inpainter.unload()
+            released.append("inpainter")
+        return released
+
     def _get_method(self, name: str) -> BaseStereoMethod:
         if name not in self._methods:
             self._methods[name] = get_method(name)

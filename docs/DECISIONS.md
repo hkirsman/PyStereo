@@ -33,6 +33,14 @@
 
 **Trade-off:** A resident predictor holds ~3 GB of unified memory. The idle timer gives both properties: consecutive photos (batch runs, a user iterating on settings) pay the load once, while a machine left idle gets the memory back after a minute. A timer that fires while a prediction is running reschedules itself instead of unloading mid-inference.
 
+## "Disable cache" only bypasses the disk cache (2026-09-02)
+
+**Decision:** The web UI "Disable cache" checkbox (and `/transform` `no_cache=1`) makes `predict_gaussians` ignore an existing `.sharp_cache/` entry and run the network again. It does not unload the resident predictor, and the fresh prediction still overwrites the cache file.
+
+**Context:** Timing comparisons between methods were confusing because a second run of the same photo skipped the 10-40 s SHARP prediction without saying so. The natural "disable cache" from browser devtools bypasses stored responses but does not restart the browser; the equivalent here is to skip the disk read while keeping model weights warm. Cold-start cost (checkpoint load, Taichi kernel compile) is a separate axis - benchmark after a warm-up run - and is surfaced as a "model load" note on the prediction step instead of being controlled by the checkbox.
+
+**Why still write the file:** The splat renderers read the `.npz` from disk, so a bypassed prediction needs a path anyway. Overwriting the existing entry keeps a single code path and means the eviction bound (`sharp_cache_max_mb`, least recently used by mtime) is the only thing that decides what stays on disk.
+
 ## Full-taichi render path duplicates constants deliberately (2026-09-02)
 
 **Decision:** `stereo/taichi_full.py` (the torch-free renderer behind the `*_full` methods) re-declares the render constants from `splat_render.py` instead of importing them.

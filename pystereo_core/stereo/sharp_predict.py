@@ -27,8 +27,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: Seconds the resident predictor may sit unused before it is unloaded to
-#: free ~3 GB of (unified) memory. Loading it back costs ~6 s.
+#: free ~3 GB of (unified) memory. Loading it back costs ~6 s. Zero or a
+#: negative value keeps the predictor loaded until :func:`unload_predictor`.
+#: Runtime changes go through :func:`set_idle_unload_s` (web UI setting).
 IDLE_UNLOAD_S = float(os.environ.get("PYSTEREO_SHARP_IDLE_S", "60"))
+
+#: Upper bound for the on-disk Gaussian cache. Oldest entries (by last use)
+#: are evicted after each new prediction. Zero disables eviction.
+DEFAULT_CACHE_MAX_MB = 2048
+_cache_max_bytes: int = int(
+    float(os.environ.get("PYSTEREO_SHARP_CACHE_MB", str(DEFAULT_CACHE_MAX_MB))) * 1024 * 1024
+)
 
 SHARP_CKPT_FILENAME = "sharp_2572gikvuh.pt"
 SHARP_CKPT_URL = (
@@ -37,6 +46,7 @@ SHARP_CKPT_URL = (
 )
 
 _DEFAULT_CACHE = Path(__file__).resolve().parent.parent.parent / ".sharp_cache"
+_CACHE_GLOB = "sharp_*.npz"
 
 DEFAULT_INTERNAL = 1536
 VIT_TILE = 384          # SHARP's ViT tile size; the sliding split needs 384 + 288 k
@@ -103,17 +113,22 @@ _idle_timer: threading.Timer | None = None
 _last_used: float = 0.0
 
 
-def _get_predictor() -> tuple[torch.nn.Module, str]:
-    """Return the resident SHARP predictor, loading it on first use."""
+def _get_predictor() -> tuple[torch.nn.Module, str, bool]:
+    """Return the resident SHARP predictor, loading it on first use.
+
+    The third value is ``True`` when this call paid the checkpoint load.
+    """
     from sharp.models import PredictorParams, create_predictor
 
     global _predictor, _predictor_device, _idle_timer, _last_used
+    loaded_now = False
     with _PREDICTOR_LOCK:
         _last_used = time.time()
         if _idle_timer is not None:
             _idle_timer.cancel()
             _idle_timer = None
         if _predictor is None:
+            loaded_now = True
             ckpt = _ckpt_path()
             if not ckpt.is_file():
                 raise FileNotFoundError(
@@ -134,14 +149,21 @@ def _get_predictor() -> tuple[torch.nn.Module, str]:
                 "SHARP predictor loaded in %.1fs (device=%s)", time.time() - t0, device,
             )
         assert _predictor_device is not None
-        return _predictor, _predictor_device
+        return _predictor, _predictor_device, loaded_now
+
+
+def _release_device_memory(device: str | None) -> None:
+    if device == "mps":
+        torch.mps.empty_cache()
+    elif device == "cuda":
+        torch.cuda.empty_cache()
 
 
 def _unload_predictor_if_idle() -> None:
     global _predictor, _predictor_device, _idle_timer
     with _PREDICTOR_LOCK:
         _idle_timer = None
-        if _predictor is None:
+        if _predictor is None or IDLE_UNLOAD_S <= 0:
             return
         # A prediction may have started (and cancelled too late) or finished
         # after this timer was armed - reschedule instead of unloading.
@@ -155,10 +177,7 @@ def _unload_predictor_if_idle() -> None:
         _predictor = None
         _predictor_device = None
         logger.info("SHARP predictor idle for %.0fs, unloading", IDLE_UNLOAD_S)
-    if device == "mps":
-        torch.mps.empty_cache()
-    elif device == "cuda":
-        torch.cuda.empty_cache()
+    _release_device_memory(device)
 
 
 def _schedule_idle_unload() -> None:
@@ -167,9 +186,168 @@ def _schedule_idle_unload() -> None:
         _last_used = time.time()
         if _idle_timer is not None:
             _idle_timer.cancel()
+            _idle_timer = None
+        if IDLE_UNLOAD_S <= 0:
+            return
         _idle_timer = threading.Timer(IDLE_UNLOAD_S, _unload_predictor_if_idle)
         _idle_timer.daemon = True
         _idle_timer.start()
+
+
+def get_idle_unload_s() -> float:
+    return IDLE_UNLOAD_S
+
+
+def set_idle_unload_s(seconds: float) -> None:
+    """Change the idle timeout at runtime; ``<= 0`` keeps the predictor loaded.
+
+    A loaded predictor gets its timer re-armed from its last use so the new
+    value takes effect immediately rather than after the next prediction.
+    """
+    global IDLE_UNLOAD_S, _idle_timer
+    seconds = float(seconds)
+    with _PREDICTOR_LOCK:
+        if seconds == IDLE_UNLOAD_S:
+            return
+        IDLE_UNLOAD_S = seconds
+        logger.info("SHARP predictor idle timeout set to %.0fs", seconds)
+        if _idle_timer is not None:
+            _idle_timer.cancel()
+            _idle_timer = None
+        if _predictor is None or seconds <= 0:
+            return
+        remaining = max(0.5, _last_used + seconds - time.time())
+        _idle_timer = threading.Timer(remaining, _unload_predictor_if_idle)
+        _idle_timer.daemon = True
+        _idle_timer.start()
+
+
+def is_predictor_loaded() -> bool:
+    with _PREDICTOR_LOCK:
+        return _predictor is not None
+
+
+def unload_predictor() -> bool:
+    """Drop the resident predictor now. Returns ``True`` if one was loaded."""
+    global _predictor, _predictor_device, _idle_timer
+    with _PREDICTOR_LOCK:
+        if _idle_timer is not None:
+            _idle_timer.cancel()
+            _idle_timer = None
+        if _predictor is None:
+            return False
+        device = _predictor_device
+        _predictor = None
+        _predictor_device = None
+        logger.info("SHARP predictor unloaded on request")
+    _release_device_memory(device)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# On-disk Gaussian cache management
+# ---------------------------------------------------------------------------
+
+
+def cache_dir() -> Path:
+    return _DEFAULT_CACHE
+
+
+def get_cache_max_mb() -> int:
+    return _cache_max_bytes // (1024 * 1024)
+
+
+def set_cache_max_mb(megabytes: int) -> None:
+    """Set the eviction bound; ``0`` disables eviction. Prunes immediately."""
+    global _cache_max_bytes
+    _cache_max_bytes = max(0, int(megabytes)) * 1024 * 1024
+    prune_cache()
+
+
+def _cache_entries(cache: Path) -> list[tuple[Path, int, float]]:
+    """``(path, bytes, last_use)`` for every complete cache file."""
+    entries: list[tuple[Path, int, float]] = []
+    if not cache.is_dir():
+        return entries
+    for path in cache.glob(_CACHE_GLOB):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        entries.append((path, st.st_size, st.st_mtime))
+    return entries
+
+
+def cache_stats(cache: Path | None = None) -> dict[str, object]:
+    entries = _cache_entries(cache or _DEFAULT_CACHE)
+    return {
+        "path": str(cache or _DEFAULT_CACHE),
+        "bytes": sum(size for _, size, _ in entries),
+        "files": len(entries),
+        "max_mb": get_cache_max_mb(),
+    }
+
+
+def clear_cache(cache: Path | None = None) -> dict[str, int]:
+    """Delete every cached prediction. Returns ``{deleted_bytes, deleted_files}``."""
+    deleted_bytes = 0
+    deleted_files = 0
+    for path, size, _ in _cache_entries(cache or _DEFAULT_CACHE):
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        deleted_bytes += size
+        deleted_files += 1
+    logger.info("SHARP cache cleared: %d files, %d bytes", deleted_files, deleted_bytes)
+    return {"deleted_bytes": deleted_bytes, "deleted_files": deleted_files}
+
+
+def prune_cache(cache: Path | None = None, keep: Path | None = None) -> int:
+    """Evict least recently used entries until the cache fits the size bound.
+
+    ``keep`` is never evicted (the entry the current render still needs).
+    Returns the number of files removed.
+    """
+    if _cache_max_bytes <= 0:
+        return 0
+    entries = _cache_entries(cache or _DEFAULT_CACHE)
+    total = sum(size for _, size, _ in entries)
+    if total <= _cache_max_bytes:
+        return 0
+    removed = 0
+    for path, size, _ in sorted(entries, key=lambda e: e[2]):
+        if total <= _cache_max_bytes:
+            break
+        if keep is not None and path == keep:
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        total -= size
+        removed += 1
+    if removed:
+        logger.info(
+            "SHARP cache pruned: %d files evicted, %.0f MB kept",
+            removed, total / (1024 * 1024),
+        )
+    return removed
+
+
+def cache_note(intermediates: dict[str, object] | None) -> str:
+    """Suffix for the ``SHARP prediction`` timing label, e.g. `` (cached)``."""
+    if not intermediates:
+        return ""
+    notes: list[str] = []
+    state = intermediates.get("sharp_cache")
+    if state == "hit":
+        notes.append("cached")
+    elif state == "off":
+        notes.append("cache off")
+    if intermediates.get("sharp_model_loaded"):
+        notes.append("model load")
+    return f" ({', '.join(notes)})" if notes else ""
 
 
 _REQUIRED_KEYS = frozenset({"means", "scales", "quats", "colors", "opacities", "f_px", "width", "height"})
@@ -269,6 +447,8 @@ def predict_gaussians(
     *,
     cache_dir: Path | None = None,
     internal: int = DEFAULT_INTERNAL,
+    use_cache: bool = True,
+    intermediates: dict[str, object] | None = None,
 ) -> Path:
     """Convert a photo to 3D Gaussians via Apple SHARP.
 
@@ -278,7 +458,14 @@ def predict_gaussians(
 
     Returns the path to the cached ``.npz`` file containing means, scales,
     quaternions, colours, opacities, focal length, and image dimensions.
-    Subsequent calls with the same image return instantly from cache.
+    Subsequent calls with the same image return instantly from cache unless
+    ``use_cache`` is ``False``, which ignores any existing entry and runs the
+    network again (the fresh result still overwrites the file, since the
+    renderer reads from it). The resident predictor is unaffected either way.
+
+    When ``intermediates`` is given, ``sharp_cache`` is set to ``"hit"``,
+    ``"miss"`` or ``"off"`` and ``sharp_model_loaded`` to ``True`` when this
+    call paid the checkpoint load - see :func:`cache_note`.
     """
     from PIL import ImageOps
 
@@ -298,12 +485,23 @@ def predict_gaussians(
 
     tag = "" if internal == DEFAULT_INTERNAL else f"_{internal}"
     out = cache / f"sharp_{_image_hash(img)}{tag}.npz"
+    if intermediates is not None:
+        intermediates["sharp_cache"] = "miss" if use_cache else "off"
     if out.exists():
-        if _cache_is_complete(out):
+        if not use_cache:
+            logger.info("SHARP cache bypassed: %s", out.name)
+        elif _cache_is_complete(out):
             logger.info("SHARP cache hit: %s", out.name)
+            if intermediates is not None:
+                intermediates["sharp_cache"] = "hit"
+            try:
+                os.utime(out)   # LRU: mark as recently used
+            except OSError:
+                pass
             return out
-        logger.warning("SHARP cache file %s is incomplete, regenerating", out.name)
-        out.unlink()
+        else:
+            logger.warning("SHARP cache file %s is incomplete, regenerating", out.name)
+            out.unlink()
 
     torch.manual_seed(0)
 
@@ -311,7 +509,9 @@ def predict_gaussians(
     f_px = _focal_length_px(w, h, f_35mm)
 
     t0 = time.time()
-    predictor, device = _get_predictor()
+    predictor, device, loaded_now = _get_predictor()
+    if loaded_now and intermediates is not None:
+        intermediates["sharp_model_loaded"] = True
     logger.info("SHARP predict: %dx%d, f_px=%.1f, internal=%d, device=%s", w, h, f_px, internal, device)
 
     if internal != DEFAULT_INTERNAL:
@@ -335,6 +535,7 @@ def predict_gaussians(
         internal=internal,
     )
     os.replace(tmp, out)
+    prune_cache(cache, keep=out)
 
     _schedule_idle_unload()
 

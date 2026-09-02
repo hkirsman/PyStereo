@@ -32,6 +32,17 @@ const btnCancelSharp = $("#btnCancelSharp");
 const btnRemoveSharp = $("#btnRemoveSharp");
 const maxDimSlider = $("#maxDimSlider");
 const maxDimValue = $("#maxDimValue");
+const disableCacheCheck = $("#disableCacheCheck");
+const cacheSharpValue = $("#cacheSharpValue");
+const cacheOutputsValue = $("#cacheOutputsValue");
+const loadedModelsValue = $("#loadedModelsValue");
+const btnClearSharp = $("#btnClearSharp");
+const btnClearOutputs = $("#btnClearOutputs");
+const btnUnloadModels = $("#btnUnloadModels");
+const sharpCacheMaxInput = $("#sharpCacheMaxInput");
+const outputsKeepInput = $("#outputsKeepInput");
+const sharpIdleInput = $("#sharpIdleInput");
+const cachePaths = $("#cachePaths");
 const btnGenerate = $("#btnGenerate");
 const statusWrap = $("#statusWrap");
 const statusBar = $("#statusBar");
@@ -414,6 +425,11 @@ function selectFile(file) {
 
 let saveSettingsTimer = null;
 
+function numberInputValue(input, fallback) {
+  const v = parseInt(input.value, 10);
+  return Number.isFinite(v) && v >= 0 ? v : fallback;
+}
+
 function saveSettings() {
   if (saveSettingsTimer) clearTimeout(saveSettingsTimer);
   saveSettingsTimer = setTimeout(async () => {
@@ -421,13 +437,27 @@ function saveSettings() {
       depth_model: depthModelSelect.value,
       max_dim: parseInt(maxDimSlider.value, 10),
       method: methodSelect.value,
+      disable_cache: disableCacheCheck.checked,
     };
+    // Only send cache limits once they have been populated from the server,
+    // so an early save cannot overwrite them with blanks.
+    if (sharpCacheMaxInput.value !== "") {
+      body.sharp_cache_max_mb = numberInputValue(sharpCacheMaxInput, 0);
+    }
+    if (outputsKeepInput.value !== "") {
+      body.outputs_keep = numberInputValue(outputsKeepInput, 0);
+    }
+    if (sharpIdleInput.value !== "") {
+      body.sharp_idle_s = numberInputValue(sharpIdleInput, 0);
+    }
     try {
       await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      // Limits apply immediately (pruning) - reflect the new sizes.
+      loadCacheStats();
     } catch {
       // Best-effort persistence
     }
@@ -446,12 +476,110 @@ async function loadSettings() {
     }
     if (s.method && methodMeta[s.method]) methodSelect.value = s.method;
     else if (methodSelect.options.length) methodSelect.value = defaultMethodName;
+    disableCacheCheck.checked = !!s.disable_cache;
     updateMethodInfo();
     updateDepthDownloadBtn();
   } catch {
     // Use defaults
   }
 }
+
+// -- Cache & memory ---------------------------------------------------------
+
+function fillNumberInput(input, value) {
+  // Do not clobber a value the user is editing right now.
+  if (document.activeElement === input) return;
+  if (value == null) return;
+  input.value = String(Math.round(value));
+}
+
+function renderCacheStats(data) {
+  if (!data) return;
+  const sharp = data.sharp || {};
+  const outputs = data.outputs || {};
+  cacheSharpValue.textContent = sharp.error
+    ? "unavailable"
+    : fmtBytes(sharp.bytes || 0) + " - " + (sharp.files || 0) + " file" + (sharp.files === 1 ? "" : "s");
+  cacheOutputsValue.textContent =
+    fmtBytes(outputs.bytes || 0) + " - " + (outputs.files || 0) + " run" + (outputs.files === 1 ? "" : "s");
+  const loaded = Array.isArray(data.loaded_models) ? data.loaded_models : [];
+  loadedModelsValue.textContent = loaded.length ? loaded.join(", ") : "nothing loaded";
+  btnClearSharp.disabled = !(sharp.files > 0);
+  btnClearOutputs.disabled = !(outputs.files > 0);
+  btnUnloadModels.disabled = loaded.length === 0;
+  fillNumberInput(sharpCacheMaxInput, sharp.max_mb);
+  fillNumberInput(outputsKeepInput, data.outputs_keep);
+  fillNumberInput(sharpIdleInput, data.sharp_idle_s);
+  const paths = [];
+  if (sharp.path) paths.push("SHARP cache: " + sharp.path);
+  if (outputs.path) paths.push("Results: " + outputs.path);
+  cachePaths.textContent = paths.join("\n");
+}
+
+async function loadCacheStats() {
+  try {
+    const res = await fetch("/api/cache");
+    if (!res.ok) return;
+    renderCacheStats(await res.json());
+  } catch {
+    // Panel simply stays stale
+  }
+}
+
+async function postCacheAction(url, body, button) {
+  button.disabled = true;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    if (!res.ok) {
+      let msg = `Server error (${res.status})`;
+      try { msg = (await res.json()).error || msg; } catch {}
+      setStatus(msg, false, true);
+      button.disabled = false;
+      return null;
+    }
+    const data = await res.json();
+    renderCacheStats(data);
+    return data;
+  } catch (err) {
+    setStatus("Request failed: " + err.message, false, true);
+    button.disabled = false;
+    return null;
+  }
+}
+
+btnClearSharp.addEventListener("click", async () => {
+  if (!confirm("Delete all cached SHARP predictions? The next run of each photo will predict again.")) return;
+  const data = await postCacheAction("/api/cache/clear", { target: "sharp" }, btnClearSharp);
+  if (data && data.deleted && data.deleted.sharp) {
+    setStatus("SHARP cache cleared (" + fmtBytes(data.deleted.sharp.deleted_bytes) + ")", false, false);
+  }
+});
+
+btnClearOutputs.addEventListener("click", async () => {
+  if (!confirm("Delete all generated results? Images shown in the Output panel will stop loading.")) return;
+  const data = await postCacheAction("/api/cache/clear", { target: "outputs" }, btnClearOutputs);
+  if (data && data.deleted && data.deleted.outputs) {
+    setStatus("Results cleared (" + fmtBytes(data.deleted.outputs.deleted_bytes) + ")", false, false);
+  }
+});
+
+btnUnloadModels.addEventListener("click", async () => {
+  const data = await postCacheAction("/api/models/unload", {}, btnUnloadModels);
+  if (data) {
+    const released = Array.isArray(data.released) ? data.released : [];
+    setStatus(released.length ? "Unloaded: " + released.join(", ") : "Nothing was loaded", false, false);
+  }
+});
+
+for (const input of [sharpCacheMaxInput, outputsKeepInput, sharpIdleInput]) {
+  input.addEventListener("change", saveSettings);
+}
+
+disableCacheCheck.addEventListener("change", saveSettings);
 
 maxDimSlider.addEventListener("input", () => {
   maxDimValue.textContent = maxDimSlider.value;
@@ -721,6 +849,7 @@ btnGenerate.addEventListener("click", async () => {
   form.append("method", methodSelect.value || defaultMethodName);
   form.append("max_dim", maxDimSlider.value);
   form.append("depth_model", depthModel);
+  form.append("disable_cache", disableCacheCheck.checked ? "1" : "0");
 
   try {
     const res = await fetch("/api/generate", { method: "POST", body: form });
@@ -783,16 +912,21 @@ btnGenerate.addEventListener("click", async () => {
     const backendNote =
       data.render_backend === "taichi" ? " - Taichi render" :
       data.render_backend === "torch" ? " - torch render" : "";
+    const cacheNote =
+      data.sharp_cache === "hit" ? " - SHARP cache hit" :
+      data.sharp_cache === "off" ? " - cache off" :
+      data.sharp_cache === "miss" ? " - SHARP cache miss" : "";
     stageTiming.textContent =
-      "Method: " + methodUsed + " - " + dims + " - " + elapsed + "s total" + backendNote;
+      "Method: " + methodUsed + " - " + dims + " - " + elapsed + "s total" + backendNote + cacheNote;
 
-    setStatus("Done (" + elapsed + "s" + backendNote.replace(" - ", ", ") + ")", false, false);
+    setStatus("Done (" + elapsed + "s" + (backendNote + cacheNote).replaceAll(" - ", ", ") + ")", false, false);
   } catch (err) {
     setStatus("Request failed: " + err.message, false, true);
   }
 
   generating = false;
   updateGenerateBtn();
+  loadCacheStats();
 });
 
 // -- Lightbox --------------------------------------------------------------
@@ -865,6 +999,7 @@ async function init() {
   await loadMethods();
   await loadDepthModels();
   await loadSettings();
+  await loadCacheStats();
   await pollModelStatus();
 }
 

@@ -98,6 +98,14 @@
             </div>
           </div>
 
+          <div class="settings-row">
+            <label class="settings-check" for="disableCacheCheck">
+              <input type="checkbox" id="disableCacheCheck" />
+              <span>Disable cache</span>
+            </label>
+            <span class="settings-note">Ignore SHARP predictions cached on disk. Loaded models stay warm.</span>
+          </div>
+
           <button type="button" class="btn btn-primary" id="btnGenerate" disabled>Generate</button>
 
           <div class="status-wrap" id="statusWrap" aria-busy="false">
@@ -108,6 +116,41 @@
           </div>
 
           <p class="hint">Inference runs locally via Python (PyTorch). Download AI models above if prompted.</p>
+
+          <details class="cache-panel" id="cachePanel">
+            <summary>Cache &amp; memory</summary>
+            <div class="cache-row">
+              <span class="cache-label">SHARP predictions</span>
+              <span class="cache-value" id="cacheSharpValue">-</span>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnClearSharp" title="Delete cached SHARP predictions (.sharp_cache).">Clear</button>
+            </div>
+            <div class="cache-row">
+              <span class="cache-label">Results</span>
+              <span class="cache-value" id="cacheOutputsValue">-</span>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnClearOutputs" title="Delete generated results (outputs/).">Clear</button>
+            </div>
+            <div class="cache-row">
+              <span class="cache-label">In memory</span>
+              <span class="cache-value" id="loadedModelsValue">-</span>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnUnloadModels" title="Free model weights now. They reload on the next run.">Unload now</button>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">SHARP cache limit</span>
+              <input type="number" id="sharpCacheMaxInput" class="settings-number" min="0" step="256" aria-label="SHARP cache limit in megabytes" />
+              <span class="settings-unit">MB, 0 = unlimited</span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Keep results</span>
+              <input type="number" id="outputsKeepInput" class="settings-number" min="0" step="10" aria-label="Number of latest results to keep" />
+              <span class="settings-unit">latest, 0 = all</span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-label">Unload SHARP after</span>
+              <input type="number" id="sharpIdleInput" class="settings-number" min="0" step="30" aria-label="Seconds of idle time before the SHARP predictor unloads" />
+              <span class="settings-unit">s idle, 0 = keep loaded</span>
+            </div>
+            <p class="hint" id="cachePaths"></p>
+          </details>
         </section>
 
         <section class="panel panel-output" aria-label="Output">

@@ -83,7 +83,30 @@ def _settings_path() -> Path:
 
 _USER_SETTINGS_KEYS = frozenset({
     "depth_model", "max_dim", "method",
+    # Cache & memory (see the "Cache & memory" panel in the web UI)
+    "disable_cache", "sharp_cache_max_mb", "outputs_keep", "sharp_idle_s",
 })
+
+#: Result folders kept under ``outputs/`` (oldest are pruned after each run).
+DEFAULT_OUTPUTS_KEEP = 200
+
+
+def _setting_int(saved: dict[str, Any], key: str, default: int, minimum: int = 0) -> int:
+    try:
+        return max(minimum, int(saved.get(key, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _setting_bool(saved: dict[str, Any], key: str, default: bool = False) -> bool:
+    val = saved.get(key, default)
+    if isinstance(val, str):
+        return val.strip().lower() in ("1", "true", "yes", "on")
+    return bool(val)
+
+
+def _form_flag(name: str) -> bool:
+    return (request.form.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _load_user_settings() -> dict[str, Any]:
@@ -104,6 +127,31 @@ def _save_user_settings(data: dict[str, Any]) -> None:
     p = _settings_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+
+
+_cache_settings_applied = False
+
+
+def _apply_cache_settings(saved: dict[str, Any]) -> None:
+    """Push persisted cache / memory settings into the SHARP module.
+
+    Safe to call before ml-sharp is importable: the module only needs torch.
+    """
+    global _cache_settings_applied
+    try:
+        from pystereo_core.stereo import sharp_predict
+    except Exception:
+        return
+    _cache_settings_applied = True
+    if "sharp_idle_s" in saved:
+        try:
+            sharp_predict.set_idle_unload_s(float(saved["sharp_idle_s"]))
+        except (TypeError, ValueError):
+            pass
+    if "sharp_cache_max_mb" in saved:
+        sharp_predict.set_cache_max_mb(
+            _setting_int(saved, "sharp_cache_max_mb", sharp_predict.DEFAULT_CACHE_MAX_MB),
+        )
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -216,9 +264,12 @@ def _get_pipeline() -> Any:
                     overrides["max_processing_dim"] = max(512, int(saved["max_dim"]))
                 except (ValueError, TypeError):
                     pass
+            if _setting_bool(saved, "disable_cache"):
+                overrides["sharp_disk_cache"] = False
             if overrides:
                 settings = dc_replace(settings, **overrides)
             _pipeline_singleton = StereoPipeline(settings=settings)
+            _apply_cache_settings(saved)
         return _pipeline_singleton
 
 
@@ -584,6 +635,8 @@ def api_settings_put() -> Any:
                     overrides["max_processing_dim"] = max(512, int(saved["max_dim"]))
                 except (ValueError, TypeError):
                     pass
+            if "disable_cache" in saved:
+                overrides["sharp_disk_cache"] = not _setting_bool(saved, "disable_cache")
             if overrides:
                 new_settings = dc_replace(
                     _pipeline_singleton.settings, **overrides,
@@ -592,10 +645,192 @@ def api_settings_put() -> Any:
                     new_settings = new_settings.with_method_defaults()
                 _pipeline_singleton.settings = new_settings
 
+    _apply_cache_settings(saved)
+
     if "depth_model" in saved:
         _ensure_registry(model_size=str(saved["depth_model"]))
 
     return jsonify(saved)
+
+
+# ---------------------------------------------------------------------------
+# Routes - cache & memory
+# ---------------------------------------------------------------------------
+
+
+def _result_dirs() -> list[tuple[Path, int, float]]:
+    """``(dir, bytes, mtime)`` for each result folder under ``outputs/``."""
+    entries: list[tuple[Path, int, float]] = []
+    if not OUTPUTS_DIR.is_dir():
+        return entries
+    for child in OUTPUTS_DIR.iterdir():
+        if not child.is_dir() or not _result_id_ok(child.name):
+            continue
+        size = 0
+        try:
+            mtime = child.stat().st_mtime
+            for f in child.iterdir():
+                if f.is_file():
+                    size += f.stat().st_size
+        except OSError:
+            continue
+        entries.append((child, size, mtime))
+    return entries
+
+
+def _outputs_stats() -> dict[str, Any]:
+    entries = _result_dirs()
+    return {
+        "path": str(OUTPUTS_DIR),
+        "bytes": sum(size for _, size, _ in entries),
+        "files": len(entries),
+    }
+
+
+def _prune_outputs(keep: int, protect: str | None = None) -> int:
+    """Delete the oldest result folders beyond ``keep``. ``0`` keeps all."""
+    if keep <= 0:
+        return 0
+    entries = sorted(_result_dirs(), key=lambda e: e[2], reverse=True)
+    removed = 0
+    for path, _, _ in entries[keep:]:
+        if protect is not None and path.name == protect:
+            continue
+        shutil.rmtree(path, ignore_errors=True)
+        removed += 1
+    if removed:
+        LOGGER.info("Pruned %d old result folder(s), keeping %d", removed, keep)
+    return removed
+
+
+def _clear_outputs() -> dict[str, int]:
+    deleted_bytes = 0
+    deleted_files = 0
+    for path, size, _ in _result_dirs():
+        shutil.rmtree(path, ignore_errors=True)
+        deleted_bytes += size
+        deleted_files += 1
+    LOGGER.info("Results cleared: %d folder(s), %d bytes", deleted_files, deleted_bytes)
+    return {"deleted_bytes": deleted_bytes, "deleted_files": deleted_files}
+
+
+def _loaded_models() -> list[str]:
+    """Names of model weights currently resident in memory."""
+    names: list[str] = []
+    try:
+        from pystereo_core.stereo import sharp_predict
+
+        if sharp_predict.is_predictor_loaded():
+            names.append("SHARP predictor")
+    except Exception:
+        pass
+    try:
+        from pystereo_core.registry import get_registry
+
+        registry = get_registry()
+        for capability, model in registry._models.items():
+            if model.is_loaded():
+                names.append(f"{capability} ({model.name})")
+    except Exception:
+        pass
+    with _pipeline_lock:
+        pipe = _pipeline_singleton
+    if pipe is not None:
+        if getattr(getattr(pipe, "_segmenter", None), "_model", None) is not None:
+            names.append("segmenter (BiRefNet)")
+        try:
+            if pipe._inpainter.is_loaded():
+                names.append(f"inpainter ({pipe.settings.inpaint_backend})")
+        except Exception:
+            pass
+    return names
+
+
+def _cache_payload() -> dict[str, Any]:
+    sharp: dict[str, Any]
+    idle_s: float | None = None
+    if not _cache_settings_applied:
+        # First look at the panel before any generation: make the reported
+        # idle timeout / cache limit match settings.json, not the env defaults.
+        _apply_cache_settings(_load_user_settings())
+    try:
+        from pystereo_core.stereo import sharp_predict
+
+        sharp = sharp_predict.cache_stats()
+        idle_s = sharp_predict.get_idle_unload_s()
+    except Exception as exc:
+        sharp = {"path": None, "bytes": 0, "files": 0, "error": str(exc)}
+    saved = _load_user_settings()
+    return {
+        "sharp": sharp,
+        "outputs": _outputs_stats(),
+        "outputs_keep": _setting_int(saved, "outputs_keep", DEFAULT_OUTPUTS_KEEP),
+        "sharp_idle_s": idle_s,
+        "loaded_models": _loaded_models(),
+    }
+
+
+@app.route("/api/cache", methods=["GET"])
+def api_cache_get() -> Any:
+    return jsonify(_cache_payload())
+
+
+@app.route("/api/cache/clear", methods=["POST"])
+def api_cache_clear() -> Any:
+    """Delete on-disk caches. JSON body: ``{"target": "sharp" | "outputs" | "all"}``."""
+    body = request.get_json(silent=True) or {}
+    target = str(body.get("target") or "all").strip().lower()
+    if target not in ("sharp", "outputs", "all"):
+        return jsonify({"error": f"Unknown target: {target}"}), 400
+    if not PREDICT_LOCK.acquire(blocking=False):
+        return jsonify({"error": "A generation is running; try again when it finishes."}), 409
+    try:
+        deleted: dict[str, Any] = {}
+        if target in ("sharp", "all"):
+            from pystereo_core.stereo import sharp_predict
+
+            deleted["sharp"] = sharp_predict.clear_cache()
+        if target in ("outputs", "all"):
+            deleted["outputs"] = _clear_outputs()
+    finally:
+        PREDICT_LOCK.release()
+    payload = _cache_payload()
+    payload["deleted"] = deleted
+    return jsonify(payload)
+
+
+@app.route("/api/models/unload", methods=["POST"])
+def api_models_unload() -> Any:
+    """Free every resident model (SHARP, depth, segmenter, inpainter) now."""
+    if not PREDICT_LOCK.acquire(blocking=False):
+        return jsonify({"error": "A generation is running; try again when it finishes."}), 409
+    try:
+        released: list[str] = []
+        try:
+            from pystereo_core.stereo import sharp_predict
+
+            if sharp_predict.unload_predictor():
+                released.append("SHARP predictor")
+        except Exception:
+            pass
+        try:
+            from pystereo_core.registry import get_registry
+
+            registry = get_registry()
+            loaded = [m.name for m in registry._models.values() if m.is_loaded()]
+            registry.unload_all()
+            released.extend(loaded)
+        except Exception:
+            pass
+        with _pipeline_lock:
+            pipe = _pipeline_singleton
+        if pipe is not None:
+            released.extend(pipe.unload_models())
+    finally:
+        PREDICT_LOCK.release()
+    payload = _cache_payload()
+    payload["released"] = released
+    return jsonify(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -708,6 +943,8 @@ def transform() -> Any:
                     overrides["max_processing_dim"] = max(512, int(max_dim_raw))
                 except ValueError:
                     pass
+            if _form_flag("no_cache"):
+                overrides["sharp_disk_cache"] = False
 
             if overrides:
                 from dataclasses import replace as dc_replace
@@ -777,6 +1014,7 @@ def api_generate() -> Any:
     method_override = (request.form.get("method") or "").strip().lower() or None
     max_dim_raw = (request.form.get("max_dim") or "").strip()
     depth_model = (request.form.get("depth_model") or "small").strip().lower()
+    disable_cache = _form_flag("disable_cache")
 
     effective_method = method_override or _get_pipeline().settings.stereo_method
     gen_needs_depth = True
@@ -828,6 +1066,10 @@ def api_generate() -> Any:
                     overrides["max_processing_dim"] = max(512, int(max_dim_raw))
                 except ValueError:
                     pass
+            # The checkbox is the source of truth for this request; the
+            # persisted setting only sets the pipeline default for /transform.
+            if pipeline.settings.sharp_disk_cache == disable_cache:
+                overrides["sharp_disk_cache"] = not disable_cache
             if overrides:
                 from dataclasses import replace as dc_replace
 
@@ -920,6 +1162,7 @@ def api_generate() -> Any:
         for label, seconds in sharp_intermediates.get("timings", [])
     ]
     render_backend = sharp_intermediates.get("render_backend")
+    sharp_cache = sharp_intermediates.get("sharp_cache")
 
     meta: dict[str, Any] = {
         "id": result_id,
@@ -931,8 +1174,15 @@ def api_generate() -> Any:
         "elapsed_seconds": elapsed,
         "timings": step_timings,
         "render_backend": render_backend,
+        "sharp_cache": sharp_cache,
+        "disable_cache": disable_cache,
     }
     (result_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    _prune_outputs(
+        _setting_int(_load_user_settings(), "outputs_keep", DEFAULT_OUTPUTS_KEEP),
+        protect=result_id,
+    )
 
     resp: dict[str, Any] = {
         "id": result_id,
@@ -944,6 +1194,8 @@ def api_generate() -> Any:
         "elapsed_seconds": elapsed,
         "timings": step_timings,
         "render_backend": render_backend,
+        "sharp_cache": sharp_cache,
+        "disable_cache": disable_cache,
     }
     if gen_needs_depth:
         resp["depth_url"] = f"/api/results/{result_id}/depth.png"

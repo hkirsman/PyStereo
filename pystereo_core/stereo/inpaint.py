@@ -14,6 +14,21 @@ from pystereo_core.stereo.config import InpaintBackendName
 logger = logging.getLogger(__name__)
 
 
+def _release_torch_memory() -> None:
+    import gc
+
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif hasattr(torch, "mps") and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    except Exception:
+        pass
+
+
 class InpaintBackend(ABC):
     """Fill occlusion holes in a warped eye view."""
 
@@ -23,6 +38,12 @@ class InpaintBackend(ABC):
 
         ``occlusion_mask``: 255 = hole to fill, 0 = keep original pixel.
         """
+
+    def unload(self) -> None:
+        """Release model weights, if any are resident. Reloads lazily on next use."""
+
+    def is_loaded(self) -> bool:
+        return False
 
 
 class NoInpaintBackend(InpaintBackend):
@@ -88,6 +109,16 @@ class LamaInpaintBackend(InpaintBackend):
         lama.device = device
         self._model = lama
         return self._model
+
+    def is_loaded(self) -> bool:
+        return self._model is not None
+
+    def unload(self) -> None:
+        if self._model is None:
+            return
+        self._model = None
+        _release_torch_memory()
+        logger.info("LaMa inpainting model unloaded")
 
     def inpaint(self, image_rgb: np.ndarray, occlusion_mask: np.ndarray) -> np.ndarray:
         if not np.any(occlusion_mask):
@@ -157,6 +188,17 @@ class AotGanInpaintBackend(InpaintBackend):
         self._model = model
         self._device = device
         return model, device
+
+    def is_loaded(self) -> bool:
+        return self._model is not None
+
+    def unload(self) -> None:
+        if self._model is None:
+            return
+        self._model = None
+        self._device = None
+        _release_torch_memory()
+        logger.info("AOT-GAN inpainting model unloaded")
 
     def inpaint(self, image_rgb: np.ndarray, occlusion_mask: np.ndarray) -> np.ndarray:
         if not np.any(occlusion_mask):

@@ -83,7 +83,11 @@ Methods report per-step timings via `stereo/timing.py:record_step` into the `int
 
 ### Settings
 
-User preferences persist in `settings.json` (gitignored). `StereoSettings` is a frozen dataclass with env-var overrides (`PYSTEREO_METHOD`, `PYSTEREO_INPAINT`, `PYSTEREO_MAX_DIM`, etc.) and per-method `SETTING_OVERRIDES`. `PYSTEREO_SHARP_IDLE_S` (default 60) sets how long the resident SHARP predictor survives idle before unloading.
+User preferences persist in `settings.json` (gitignored). `StereoSettings` is a frozen dataclass with env-var overrides (`PYSTEREO_METHOD`, `PYSTEREO_INPAINT`, `PYSTEREO_MAX_DIM`, etc.) and per-method `SETTING_OVERRIDES`. `PYSTEREO_SHARP_IDLE_S` (default 60) sets how long the resident SHARP predictor survives idle before unloading; the web UI setting `sharp_idle_s` overrides it at runtime (0 = never unload).
+
+### Caches
+
+`.sharp_cache/` holds one `.npz` per SHARP prediction, keyed by pixel hash and internal size; `outputs/` holds web UI results. `StereoSettings.sharp_disk_cache = False` (web UI "Disable cache", `/transform` `no_cache=1`, `PYSTEREO_SHARP_CACHE=0`) skips reading `.sharp_cache/` but still writes it - the renderer reads the file - and never touches the resident predictor. `predict_gaussians` reports `sharp_cache` (`hit` / `miss` / `off`) and `sharp_model_loaded` into `intermediates`; `sharp_predict.cache_note` turns them into the "(cached)" / "(cache off, model load)" suffix on the "SHARP prediction" timing label. Size control lives in `sharp_predict` (`set_cache_max_mb`, LRU by mtime, `prune_cache` after each write) and `app.py` (`_prune_outputs`, `outputs_keep`). `GET /api/cache`, `POST /api/cache/clear`, `POST /api/models/unload` back the "Cache & memory" panel.
 
 ### Model weights
 

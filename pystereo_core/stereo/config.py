@@ -42,6 +42,11 @@ class StereoSettings:
     segmenter_padding: int = 200
     narrow_strip_max_px: int = 12
     bg_plate_tight_dilate_px: int = 10
+    #: Read SHARP predictions back from ``.sharp_cache``. ``False`` re-runs
+    #: the network every time (benchmarking); the resident predictor and the
+    #: model weights are unaffected.
+    sharp_disk_cache: bool = True
+
     def with_method_defaults(self) -> StereoSettings:
         """Return a copy with method-specific overrides applied.
 
@@ -97,6 +102,9 @@ class StereoSettings:
         heal_raw = os.environ.get("PYSTEREO_HEAL", "1").strip().lower()
         depth_healing = heal_raw not in ("0", "false", "no", "off")
 
+        cache_raw = os.environ.get("PYSTEREO_SHARP_CACHE", "1").strip().lower()
+        sharp_disk_cache = cache_raw not in ("0", "false", "no", "off")
+
         # Build with neutral defaults, then apply method-specific overrides,
         # then apply any explicit env-var overrides on top.
         base = cls(
@@ -105,6 +113,7 @@ class StereoSettings:
             inpaint_backend=backend,
             max_processing_dim=max_processing_dim,
             depth_healing=depth_healing,
+            sharp_disk_cache=sharp_disk_cache,
         )
         base = base.with_method_defaults()
 

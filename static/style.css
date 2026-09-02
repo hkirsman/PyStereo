@@ -356,6 +356,49 @@ body.model-gate-active .app-shell > .layout {
   accent-color: var(--accent);
 }
 
+.settings-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.settings-check input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.settings-note {
+  flex: 1;
+  min-width: 10rem;
+  font-size: 0.72rem;
+  color: #7a7a7a;
+  line-height: 1.35;
+}
+
+.settings-number {
+  width: 6rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: #1a1a1a;
+  color: var(--text);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-number:focus {
+  outline: 1px solid #444;
+}
+
+.settings-unit {
+  font-size: 0.72rem;
+  color: #7a7a7a;
+}
+
 .settings-value {
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
@@ -520,6 +563,71 @@ body.model-gate-active .app-shell > .layout {
   font-size: 0.72rem;
   color: #5c5c5c;
   line-height: 1.35;
+}
+
+/* ----- Cache & memory panel ----- */
+
+.cache-panel {
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: #0d0d0d;
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.cache-panel summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--muted);
+  user-select: none;
+  list-style: none;
+}
+
+.cache-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.cache-panel summary::before {
+  content: "\25B8";
+  display: inline-block;
+  width: 1rem;
+  color: #5c5c5c;
+}
+
+.cache-panel[open] summary::before {
+  content: "\25BE";
+}
+
+.cache-panel:not([open]) {
+  gap: 0;
+}
+
+.cache-panel .hint {
+  white-space: pre-line;
+}
+
+.cache-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.cache-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+  min-width: 8.5rem;
+}
+
+.cache-value {
+  flex: 1;
+  font-size: 0.78rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 /* ----- Pipeline output stages ----- */

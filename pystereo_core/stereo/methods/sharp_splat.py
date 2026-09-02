@@ -66,12 +66,18 @@ class _SharpBase(BaseStereoMethod):
         settings: StereoSettings,
         intermediates: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
-        from pystereo_core.stereo.sharp_predict import predict_gaussians
+        from pystereo_core.stereo.sharp_predict import cache_note, predict_gaussians
         from pystereo_core.stereo.splat_render import render_stereo
 
         t0 = time.perf_counter()
-        npz_path = predict_gaussians(image, internal=self._internal)
-        record_step(intermediates, "SHARP prediction", time.perf_counter() - t0)
+        npz_path = predict_gaussians(
+            image, internal=self._internal,
+            use_cache=settings.sharp_disk_cache, intermediates=intermediates,
+        )
+        record_step(
+            intermediates, "SHARP prediction" + cache_note(intermediates),
+            time.perf_counter() - t0,
+        )
 
         subject_mask: np.ndarray | None = None
         if fg_mask is not None:
@@ -244,12 +250,18 @@ class SharpDepthMethod(_SharpBase):
     ) -> tuple[np.ndarray, np.ndarray]:
         import cv2
 
-        from pystereo_core.stereo.sharp_predict import predict_gaussians
+        from pystereo_core.stereo.sharp_predict import cache_note, predict_gaussians
         from pystereo_core.stereo.splat_render import SharpScene, linear_to_srgb
 
         t0 = time.perf_counter()
-        npz_path = predict_gaussians(image)
-        record_step(intermediates, "SHARP prediction", time.perf_counter() - t0)
+        npz_path = predict_gaussians(
+            image,
+            use_cache=settings.sharp_disk_cache, intermediates=intermediates,
+        )
+        record_step(
+            intermediates, "SHARP prediction" + cache_note(intermediates),
+            time.perf_counter() - t0,
+        )
         t0 = time.perf_counter()
         scene = SharpScene(str(npz_path))
         _, center_depth, _ = scene.render(0.0, 0.0)
@@ -309,12 +321,18 @@ class SharpMeshMethod(_SharpBase):
         intermediates: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         from pystereo_core.stereo.mesh_render import render_mesh_stereo
-        from pystereo_core.stereo.sharp_predict import predict_gaussians
+        from pystereo_core.stereo.sharp_predict import cache_note, predict_gaussians
         from pystereo_core.stereo.splat_render import SharpScene
 
         t0 = time.perf_counter()
-        npz_path = predict_gaussians(image)
-        record_step(intermediates, "SHARP prediction", time.perf_counter() - t0)
+        npz_path = predict_gaussians(
+            image,
+            use_cache=settings.sharp_disk_cache, intermediates=intermediates,
+        )
+        record_step(
+            intermediates, "SHARP prediction" + cache_note(intermediates),
+            time.perf_counter() - t0,
+        )
         t0 = time.perf_counter()
         scene = SharpScene(str(npz_path))
 
@@ -383,7 +401,7 @@ class SharpTaichiMethod(_SharpBase):
     ) -> tuple[np.ndarray, np.ndarray]:
         import cv2
 
-        from pystereo_core.stereo.sharp_predict import predict_gaussians
+        from pystereo_core.stereo.sharp_predict import cache_note, predict_gaussians
         from pystereo_core.stereo.splat_render import (
             SharpScene,
             linear_to_srgb,
@@ -391,8 +409,14 @@ class SharpTaichiMethod(_SharpBase):
         from pystereo_core.stereo.taichi_render import select_ewa_compositor
 
         t0 = time.perf_counter()
-        npz_path = predict_gaussians(image)
-        record_step(intermediates, "SHARP prediction", time.perf_counter() - t0)
+        npz_path = predict_gaussians(
+            image,
+            use_cache=settings.sharp_disk_cache, intermediates=intermediates,
+        )
+        record_step(
+            intermediates, "SHARP prediction" + cache_note(intermediates),
+            time.perf_counter() - t0,
+        )
         t_render = time.perf_counter()
         scene = SharpScene(str(npz_path))
 

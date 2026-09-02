@@ -70,10 +70,25 @@ The web UI and the desktop GUI both expose HTTP endpoints for integration:
 - `POST /transform` - accepts a JPEG/PNG upload, returns an SBS JPEG
 
 Optional `/transform` form fields: `method`, `depth_model`, `max_dim`
-(processing resolution) and `max_pixels`. The last one caps the **output** SBS
-area in pixels - synthesis still runs at full resolution and the result is
-downscaled just before encoding, so callers with a fixed display budget (a
-headset, say) do not receive a 50 MP JPEG they will only shrink.
+(processing resolution), `max_pixels` and `no_cache`. `max_pixels` caps the
+**output** SBS area in pixels - synthesis still runs at full resolution and
+the result is downscaled just before encoding, so callers with a fixed
+display budget (a headset, say) do not receive a 50 MP JPEG they will only
+shrink. `no_cache=1` ignores SHARP predictions cached on disk and runs the
+network again (for timing comparisons); loaded models stay resident.
+
+### Caches
+
+Two things grow on disk: SHARP predictions in `.sharp_cache/` (one `.npz`
+per photo, 20-60 MB each) and web UI results in `outputs/`. The "Cache &
+memory" panel in the web UI shows both sizes, clears either one, and sets
+the limits (`sharp_cache_max_mb`, least recently used entries are evicted
+after each prediction, default 2048; `outputs_keep`, latest N results,
+default 200; 0 disables either). The same panel sets how long the resident
+SHARP predictor survives idle (`sharp_idle_s`, 0 keeps it loaded) and can
+unload every model right away. The "Disable cache" checkbox next to
+Generate skips reading `.sharp_cache/` for that run - the stages panel then
+labels the prediction step "cache off" instead of "cached".
 
 Any application can point its stereo service URL to `http://127.0.0.1:8766`
 to use PyStereo for AI stereo generation.
