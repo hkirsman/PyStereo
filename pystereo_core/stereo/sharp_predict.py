@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,6 +25,10 @@ if TYPE_CHECKING:
     from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+#: Seconds the resident predictor may sit unused before it is unloaded to
+#: free ~3 GB of (unified) memory. Loading it back costs ~6 s.
+IDLE_UNLOAD_S = float(os.environ.get("PYSTEREO_SHARP_IDLE_S", "60"))
 
 SHARP_CKPT_FILENAME = "sharp_2572gikvuh.pt"
 SHARP_CKPT_URL = (
@@ -86,6 +91,85 @@ def _spn_forward_any_size(self: torch.nn.Module, x: torch.Tensor) -> list[torch.
     x_lowres = cw(self, self.upsample_lowres, x_lowres)
     x_lowres = cw(self, self.fuse_lowres, torch.cat((x2_features, x_lowres), dim=1))
     return [x_latent0, x_latent1, x0_features, x1_features, x_lowres]
+
+
+# Resident SHARP predictor. The checkpoint takes ~6 s to load and the model
+# holds ~3 GB, so it is kept between photos (a batch pays the load once, like
+# sharp-local does) and dropped after IDLE_UNLOAD_S without use.
+_PREDICTOR_LOCK = threading.Lock()
+_predictor: torch.nn.Module | None = None
+_predictor_device: str | None = None
+_idle_timer: threading.Timer | None = None
+_last_used: float = 0.0
+
+
+def _get_predictor() -> tuple[torch.nn.Module, str]:
+    """Return the resident SHARP predictor, loading it on first use."""
+    from sharp.models import PredictorParams, create_predictor
+
+    global _predictor, _predictor_device, _idle_timer, _last_used
+    with _PREDICTOR_LOCK:
+        _last_used = time.time()
+        if _idle_timer is not None:
+            _idle_timer.cancel()
+            _idle_timer = None
+        if _predictor is None:
+            ckpt = _ckpt_path()
+            if not ckpt.is_file():
+                raise FileNotFoundError(
+                    f"SHARP checkpoint not found at {ckpt}. "
+                    "Download it via the pystereo UI or run: "
+                    f"curl -L -o {ckpt} {SHARP_CKPT_URL}"
+                )
+            from pystereo_core.registry import detect_device
+
+            device = detect_device()
+            t0 = time.time()
+            predictor = create_predictor(PredictorParams())
+            predictor.load_state_dict(torch.load(ckpt, weights_only=True))
+            predictor.eval().to(device)
+            _predictor = predictor
+            _predictor_device = device
+            logger.info(
+                "SHARP predictor loaded in %.1fs (device=%s)", time.time() - t0, device,
+            )
+        assert _predictor_device is not None
+        return _predictor, _predictor_device
+
+
+def _unload_predictor_if_idle() -> None:
+    global _predictor, _predictor_device, _idle_timer
+    with _PREDICTOR_LOCK:
+        _idle_timer = None
+        if _predictor is None:
+            return
+        # A prediction may have started (and cancelled too late) or finished
+        # after this timer was armed - reschedule instead of unloading.
+        remaining = _last_used + IDLE_UNLOAD_S - time.time()
+        if remaining > 0.5:
+            _idle_timer = threading.Timer(remaining, _unload_predictor_if_idle)
+            _idle_timer.daemon = True
+            _idle_timer.start()
+            return
+        device = _predictor_device
+        _predictor = None
+        _predictor_device = None
+        logger.info("SHARP predictor idle for %.0fs, unloading", IDLE_UNLOAD_S)
+    if device == "mps":
+        torch.mps.empty_cache()
+    elif device == "cuda":
+        torch.cuda.empty_cache()
+
+
+def _schedule_idle_unload() -> None:
+    global _idle_timer, _last_used
+    with _PREDICTOR_LOCK:
+        _last_used = time.time()
+        if _idle_timer is not None:
+            _idle_timer.cancel()
+        _idle_timer = threading.Timer(IDLE_UNLOAD_S, _unload_predictor_if_idle)
+        _idle_timer.daemon = True
+        _idle_timer.start()
 
 
 _REQUIRED_KEYS = frozenset({"means", "scales", "quats", "colors", "opacities", "f_px", "width", "height"})
@@ -201,7 +285,6 @@ def predict_gaussians(
     from pystereo_core.sharp_imports import ensure_sharp_imports
 
     ensure_sharp_imports()
-    from sharp.models import PredictorParams, create_predictor
     from sharp.models.encoders import spn_encoder
 
     validate_internal(internal)
@@ -222,28 +305,14 @@ def predict_gaussians(
         logger.warning("SHARP cache file %s is incomplete, regenerating", out.name)
         out.unlink()
 
-    ckpt = _ckpt_path()
-    if not ckpt.is_file():
-        raise FileNotFoundError(
-            f"SHARP checkpoint not found at {ckpt}. "
-            "Download it via the pystereo UI or run: "
-            f"curl -L -o {ckpt} {SHARP_CKPT_URL}"
-        )
-
-    from pystereo_core.registry import detect_device
-
-    device = detect_device()
     torch.manual_seed(0)
 
     f_35mm = _extract_focal_35mm(pil_image)
     f_px = _focal_length_px(w, h, f_35mm)
 
     t0 = time.time()
+    predictor, device = _get_predictor()
     logger.info("SHARP predict: %dx%d, f_px=%.1f, internal=%d, device=%s", w, h, f_px, internal, device)
-
-    predictor = create_predictor(PredictorParams())
-    predictor.load_state_dict(torch.load(ckpt, weights_only=True))
-    predictor.eval().to(device)
 
     if internal != DEFAULT_INTERNAL:
         spn_encoder.SlidingPyramidNetwork.forward = _spn_forward_any_size  # type: ignore[method-assign]
@@ -267,11 +336,7 @@ def predict_gaussians(
     )
     os.replace(tmp, out)
 
-    del predictor
-    if device == "mps":
-        torch.mps.empty_cache()
-    elif device == "cuda":
-        torch.cuda.empty_cache()
+    _schedule_idle_unload()
 
     logger.info(
         "SHARP predict done: %d gaussians in %.1fs -> %s",
