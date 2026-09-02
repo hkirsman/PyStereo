@@ -918,6 +918,7 @@ def api_generate() -> Any:
         {"label": label, "seconds": seconds}
         for label, seconds in sharp_intermediates.get("timings", [])
     ]
+    render_backend = sharp_intermediates.get("render_backend")
 
     meta: dict[str, Any] = {
         "id": result_id,
@@ -928,6 +929,7 @@ def api_generate() -> Any:
         "method": effective_method,
         "elapsed_seconds": elapsed,
         "timings": step_timings,
+        "render_backend": render_backend,
     }
     (result_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
@@ -940,6 +942,7 @@ def api_generate() -> Any:
         "height": h,
         "elapsed_seconds": elapsed,
         "timings": step_timings,
+        "render_backend": render_backend,
     }
     if gen_needs_depth:
         resp["depth_url"] = f"/api/results/{result_id}/depth.png"

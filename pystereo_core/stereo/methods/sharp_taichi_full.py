@@ -82,6 +82,7 @@ class _FullTaichiBase(_SharpBase):
         record_step(intermediates, "Splat render (taichi)", time.perf_counter() - t0)
 
         if intermediates is not None:
+            intermediates["render_backend"] = "taichi"
             intermediates["splat_rgb"] = result["center_rgb"]
             intermediates["depth01"] = result["depth01"]
 
@@ -115,8 +116,8 @@ class SharpAlphaFullMethod(_FullTaichiBase):
     ui_info: ClassVar[str] = (
         "Experimental all-Taichi renderer: same clean alpha-composited look "
         "as SHARP Alpha, at standard 1536 resolution and with the fastest "
-        "render step. In the packaged Mac app this usually falls back to "
-        "the torch renderer."
+        "render step. The result line shows whether Taichi or the torch "
+        "fallback rendered it."
     )
     _taichi_mode: ClassVar[str] = "alpha"
     _render_mode: ClassVar[RenderMode] = "alpha_taichi"  # fallback path only
@@ -135,8 +136,8 @@ class SharpSplatFullMethod(_FullTaichiBase):
     )
     ui_info: ClassVar[str] = (
         "Experimental all-Taichi renderer: same look as SHARP Splat with "
-        "the fastest render step. In the packaged Mac app this usually "
-        "falls back to the torch renderer."
+        "the fastest render step. The result line shows whether Taichi or "
+        "the torch fallback rendered it."
     )
     _taichi_mode: ClassVar[str] = "zbuf"
     _render_mode: ClassVar[RenderMode] = "zbuf"  # fallback path only

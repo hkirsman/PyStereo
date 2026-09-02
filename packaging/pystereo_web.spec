@@ -42,6 +42,9 @@ if (REPO / "static").is_dir():
 _taichi_kernels = REPO / "pystereo_core" / "stereo" / "_taichi_kernels.py"
 if _taichi_kernels.is_file():
     datas.append((str(_taichi_kernels), "pystereo_core/stereo"))
+_taichi_full_kernels = REPO / "pystereo_core" / "stereo" / "_taichi_full_kernels.py"
+if _taichi_full_kernels.is_file():
+    datas.append((str(_taichi_full_kernels), "pystereo_core/stereo"))
 
 try:
     datas += copy_metadata("imageio")
@@ -85,7 +88,9 @@ hiddenimports = (
         "pystereo_core.logging_config",
         "pystereo_core.sharp_imports",
         "pystereo_core.stereo._taichi_kernels",
+        "pystereo_core.stereo._taichi_full_kernels",
         "pystereo_core.stereo.taichi_render",
+        "pystereo_core.stereo.taichi_full",
         "imageio",
         "imageio.v2",
         "imageio.core",

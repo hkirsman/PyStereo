@@ -768,10 +768,13 @@ btnGenerate.addEventListener("click", async () => {
     const elapsed = data.elapsed_seconds != null ? data.elapsed_seconds.toFixed(1) : "?";
     const dims = data.width && data.height ? data.width + "x" + data.height : "";
     const methodUsed = data.method || "default";
+    const backendNote =
+      data.render_backend === "taichi" ? " - Taichi render" :
+      data.render_backend === "torch" ? " - torch render" : "";
     stageTiming.textContent =
-      "Method: " + methodUsed + " - " + dims + " - " + elapsed + "s total";
+      "Method: " + methodUsed + " - " + dims + " - " + elapsed + "s total" + backendNote;
 
-    setStatus("Done (" + elapsed + "s)", false, false);
+    setStatus("Done (" + elapsed + "s" + backendNote.replace(" - ", ", ") + ")", false, false);
   } catch (err) {
     setStatus("Request failed: " + err.message, false, true);
   }

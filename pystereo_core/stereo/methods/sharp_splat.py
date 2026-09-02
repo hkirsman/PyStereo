@@ -91,6 +91,13 @@ class _SharpBase(BaseStereoMethod):
             mode=self._render_mode,
         )
         record_step(intermediates, "Splat render", time.perf_counter() - t0)
+        if intermediates is not None:
+            backend = "torch"
+            if self._render_mode == "alpha_taichi":
+                from pystereo_core.stereo.taichi_render import is_taichi_available
+
+                backend = "taichi" if is_taichi_available() else "torch"
+            intermediates["render_backend"] = backend
 
         if intermediates is not None:
             if "center_rgb" in result:
@@ -199,8 +206,8 @@ class SharpAlphaTaichiMethod(_SharpBase):
     )
     ui_info: ClassVar[str] = (
         "Same quality as SHARP Alpha, with a faster splat render when Taichi "
-        "is available. In the packaged Mac app this usually runs on torch "
-        "instead."
+        "is available. The result line shows whether Taichi or the torch "
+        "fallback rendered it."
     )
     uses_taichi: ClassVar[bool] = True
     _detail_transfer: ClassVar[bool] = True
@@ -361,8 +368,8 @@ class SharpTaichiMethod(_SharpBase):
     )
     ui_info: ClassVar[str] = (
         "Same stereo as SHARP Splat, with a faster splat render when Taichi "
-        "is available (~20 s on a MacBook M4). In the packaged Mac app this "
-        "usually runs on torch instead."
+        "is available (~20 s on a MacBook M4). The result line shows whether "
+        "Taichi or the torch fallback rendered it."
     )
     uses_taichi: ClassVar[bool] = True
     _detail_transfer: ClassVar[bool] = False
@@ -424,6 +431,7 @@ class SharpTaichiMethod(_SharpBase):
             return img
 
         if intermediates is not None:
+            intermediates["render_backend"] = backend
             intermediates["splat_rgb"] = (
                 linear_to_srgb(center_rgb) * 255
             ).astype(np.uint8)
