@@ -496,6 +496,8 @@ class ModelDownloadManager:
     _job_bytes_total: int = field(default=0, init=False)
     _file_reported: int = field(default=0, init=False)
     _cancel_requested: bool = field(default=False, init=False)
+    # SHARP was requested while the worker was busy; start it when free.
+    _sharp_queued: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         for spec in STEREO_PACK:
@@ -659,35 +661,68 @@ class ModelDownloadManager:
     def ensure_sharp_model_async(self) -> bool:
         """Start downloading the SHARP checkpoint in the background.
 
-        Returns True if a download was started (or the model is already local).
+        If the worker thread is busy with another job (base pack or a depth
+        model), the request is queued and starts as soon as that job ends.
+        Returns True if a download was started, queued, or already local.
         """
         if _artifact_is_local(SHARP_SPEC):
             return True
         with self._lock:
-            if self._thread is not None and self._thread.is_alive():
-                return True
             art_id = SHARP_SPEC.id
             if art_id not in self._artifacts:
                 self._artifacts[art_id] = _ArtifactRuntime()
-            self._cancel_requested = False
-            self._error = None
-            self._message = f"Downloading {SHARP_SPEC.name}..."
-            size = _FALLBACK_BYTES.get(art_id, 0)
-            self._file_reported = 0
             art = self._artifacts[art_id]
-            art.state = "downloading"
-            art.percent = 0
-            art.error = None
-            art.bytes_total = size
-            art.bytes_downloaded = 0
-            self._thread = threading.Thread(
-                target=self._run_single_download,
-                args=(SHARP_SPEC,),
-                name="pystereo-dl-sharp",
-                daemon=True,
-            )
-            self._thread.start()
+            if self._thread is not None and self._thread.is_alive():
+                if art.state == "downloading":
+                    return True
+                self._sharp_queued = True
+                art.state = "queued"
+                art.percent = 0
+                art.error = None
+                art.bytes_total = _FALLBACK_BYTES.get(art_id, 0)
+                art.bytes_downloaded = 0
+                return True
+            self._sharp_queued = False
+            self._start_sharp_download_locked()
         return True
+
+    def _start_sharp_download_locked(self) -> None:
+        """Spawn the SHARP download thread. Caller must hold ``_lock``."""
+        art_id = SHARP_SPEC.id
+        if art_id not in self._artifacts:
+            self._artifacts[art_id] = _ArtifactRuntime()
+        self._cancel_requested = False
+        self._error = None
+        self._message = f"Downloading {SHARP_SPEC.name}..."
+        self._file_reported = 0
+        art = self._artifacts[art_id]
+        art.state = "downloading"
+        art.percent = 0
+        art.error = None
+        art.bytes_total = _FALLBACK_BYTES.get(art_id, 0)
+        art.bytes_downloaded = 0
+        self._thread = threading.Thread(
+            target=self._run_single_download,
+            args=(SHARP_SPEC,),
+            name="pystereo-dl-sharp",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _start_queued_sharp(self) -> None:
+        """Run a SHARP download that was queued behind the finishing job."""
+        with self._lock:
+            if not self._sharp_queued:
+                return
+            self._sharp_queued = False
+            art = self._artifacts.get(SHARP_SPEC.id)
+            if art is None or art.state != "queued":
+                return
+            if _artifact_is_local(SHARP_SPEC):
+                art.state = "ready"
+                art.percent = 100
+                return
+            self._start_sharp_download_locked()
 
     def cancel_sharp_download(self) -> dict[str, Any]:
         """Request cancellation of an in-progress SHARP download.
@@ -697,8 +732,19 @@ class ModelDownloadManager:
         """
         with self._lock:
             art = self._artifacts.get(SHARP_SPEC.id)
+            if self._sharp_queued or (art is not None and art.state == "queued"):
+                # Not running yet - just drop the request. Do not set
+                # _cancel_requested: that would abort the job the worker is
+                # actually busy with.
+                self._sharp_queued = False
+                if art is not None:
+                    art.state = "absent"
+                    art.percent = 0
+                    art.bytes_downloaded = 0
+                    art.error = None
+                return {"cancelled": True}
             alive = self._thread is not None and self._thread.is_alive()
-            downloading = art is not None and art.state in ("queued", "downloading")
+            downloading = art is not None and art.state == "downloading"
             if not alive and not downloading:
                 return {"cancelled": False, "reason": "not_downloading"}
             self._cancel_requested = True
@@ -800,6 +846,9 @@ class ModelDownloadManager:
                     art.state = "error"
                     art.error = str(exc)
             self.refresh_local_state()
+        finally:
+            if spec.id != SHARP_SPEC.id:
+                self._start_queued_sharp()
 
     def ensure_stereo_pack_async(self) -> None:
         """Start a background download if the pack is not already ready."""
@@ -1054,6 +1103,8 @@ class ModelDownloadManager:
                     if art.state == "downloading":
                         art.state = "error"
                         art.error = str(exc)
+        finally:
+            self._start_queued_sharp()
 
     def _download_hf(self, spec: ArtifactSpec) -> None:
         from huggingface_hub import snapshot_download

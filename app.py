@@ -298,6 +298,7 @@ def _attach_sharp_status(payload: dict[str, Any]) -> dict[str, Any]:
         and sharp_art.state in ("queued", "downloading")
     )
     payload["sharp_downloading"] = downloading
+    payload["sharp_queued"] = downloading and sharp_art.state == "queued"
     if downloading and sharp_art is not None:
         payload["sharp_percent"] = int(sharp_art.percent or 0)
         payload["sharp_bytes_downloaded"] = int(sharp_art.bytes_downloaded or 0)

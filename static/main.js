@@ -66,7 +66,10 @@ let stageOriginalObjectUrl = null;
 let modelReady = false;
 let sharpReady = false;
 let sharpDownloading = false;
+/** SHARP download is waiting for the base model download to finish. */
+let sharpQueued = false;
 let sharpPercent = 0;
+let modelDownloading = false;
 /** Ignore stale sharp_downloading:false until this timestamp (ms). */
 let sharpDownloadGraceUntil = 0;
 let generating = false;
@@ -119,6 +122,7 @@ function applyModelStatus(data) {
 
   const state = data.state || "idle";
   modelReady = state === "ready";
+  modelDownloading = state === "downloading";
   applySharpStatus(data);
 
   if (state === "ready") {
@@ -175,6 +179,7 @@ function applySharpStatus(data) {
   if (data.sharp_ready) {
     sharpReady = true;
     sharpDownloading = false;
+    sharpQueued = false;
     sharpPercent = 100;
     sharpDownloadGraceUntil = 0;
     return;
@@ -182,6 +187,7 @@ function applySharpStatus(data) {
   sharpReady = false;
   if (data.sharp_downloading) {
     sharpDownloading = true;
+    sharpQueued = !!data.sharp_queued;
     sharpPercent = data.sharp_percent || 0;
     sharpDownloadGraceUntil = Date.now() + 8000;
     return;
@@ -191,6 +197,7 @@ function applySharpStatus(data) {
     return;
   }
   sharpDownloading = false;
+  sharpQueued = false;
   sharpPercent = 0;
 }
 
@@ -527,8 +534,9 @@ function updateSharpBanner() {
   }
   if (sharpDownloading) {
     const pct = sharpPercent || 0;
-    sharpBannerText.innerHTML =
-      'Downloading <a href="https://apple.github.io/ml-sharp/" target="_blank" rel="noopener">SHARP</a> checkpoint... ' + pct + "%";
+    sharpBannerText.innerHTML = sharpQueued
+      ? '<a href="https://apple.github.io/ml-sharp/" target="_blank" rel="noopener">SHARP</a> checkpoint queued - starts when the AI stereo models finish.'
+      : 'Downloading <a href="https://apple.github.io/ml-sharp/" target="_blank" rel="noopener">SHARP</a> checkpoint... ' + pct + "%";
     btnDownloadSharp.hidden = true;
     btnCancelSharp.hidden = false;
     btnCancelSharp.disabled = false;
@@ -547,6 +555,7 @@ function updateSharpBanner() {
 btnDownloadSharp.addEventListener("click", async () => {
   // Optimistic UI - do not leave the button idle waiting on POST / stale polls.
   sharpDownloading = true;
+  sharpQueued = modelDownloading;
   sharpPercent = sharpPercent || 0;
   sharpDownloadGraceUntil = Date.now() + 8000;
   updateSharpBanner();
@@ -559,6 +568,7 @@ btnDownloadSharp.addEventListener("click", async () => {
       try { msg = (await res.json()).error || msg; } catch {}
       sharpDownloadGraceUntil = 0;
       sharpDownloading = false;
+      sharpQueued = false;
       updateSharpBanner();
       btnDownloadSharp.textContent = "Retry";
       btnDownloadSharp.disabled = false;
@@ -571,6 +581,7 @@ btnDownloadSharp.addEventListener("click", async () => {
   } catch {
     sharpDownloadGraceUntil = 0;
     sharpDownloading = false;
+    sharpQueued = false;
     updateSharpBanner();
     btnDownloadSharp.textContent = "Retry";
     btnDownloadSharp.disabled = false;
@@ -591,6 +602,7 @@ btnCancelSharp.addEventListener("click", async () => {
     }
     const data = await res.json();
     sharpDownloading = false;
+    sharpQueued = false;
     sharpPercent = 0;
     applyModelStatus(data);
     schedulePoll(2000);
