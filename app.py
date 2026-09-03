@@ -1020,6 +1020,10 @@ def transform() -> Any:
             gui_log(f"  {msg}")
 
     elapsed = time.perf_counter() - t0
+    LOGGER.info(
+        "Transformed %s (%dx%d, method=%s) in %.1fs",
+        name, w, h, effective_method, elapsed,
+    )
     gui_log(f"  Done - {name} ({elapsed:.1f}s)")
 
     buf = io.BytesIO()

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import multiprocessing
 
 
@@ -13,7 +12,11 @@ def main() -> None:
 
     # Before any import that may touch logging or torch progress bars.
     ensure_stdio()
-    logging.basicConfig(level=logging.INFO)
+    # No basicConfig here: it would claim the root logger, and app.py's
+    # ensure_stderr_info_logging only attaches the file handler while the root
+    # is still bare. Configuring it first cost the packaged build every
+    # pystereo_core and werkzeug record - stderr is /dev/null in a windowed
+    # app, so the log file held nothing but "pystereo-web" lines.
     from pystereo_core._version import __version__
     from app import LOGGER, OUTPUTS_DIR, app
 
