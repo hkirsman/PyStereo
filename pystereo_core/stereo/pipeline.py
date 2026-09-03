@@ -116,12 +116,23 @@ class StereoPipeline:
         The result shares this pipeline's loaded models (segmenter,
         inpainter, method instances), so it is cheap to create per request.
         ``inpaint_backend`` cannot be overridden here - the inpainter is
-        shared, not rebuilt.
+        shared, not rebuilt. Overriding ``stereo_method`` also applies that
+        method's ``SETTING_OVERRIDES``, so a derived pipeline matches one
+        built for the method from the start.
         """
         if "inpaint_backend" in overrides:
             raise ValueError("derive() cannot change inpaint_backend; build a new StereoPipeline")
+        settings = dc_replace(self.settings, **overrides)
+        if "stereo_method" in overrides:
+            # A new method brings its own SETTING_OVERRIDES, the way
+            # StereoSettings.from_env applies them - except the inpaint
+            # backend, which stays with the shared inpainter.
+            settings = dc_replace(
+                settings.with_method_defaults(),
+                inpaint_backend=self.settings.inpaint_backend,
+            )
         clone = copy.copy(self)
-        clone.settings = dc_replace(self.settings, **overrides)
+        clone.settings = settings
         return clone
 
     def with_settings(self, settings: StereoSettings) -> StereoPipeline:
