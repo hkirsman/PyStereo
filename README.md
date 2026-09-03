@@ -123,6 +123,10 @@ Or use the convenience scripts:
 compile-binaries-win.bat
 ```
 
+Windows packages install Taichi the same way the macOS script already does.
+Use Python 3.11 or 3.13 for that venv - Taichi has no 3.14 wheels, and a
+3.14 freeze falls back to torch for `(taichi)` methods.
+
 First launch still needs an explicit model download (web **Download**, batch
 **Models** group, or `--download-model`) unless you ship weights separately.
 Distribute either bundle by zipping the whole output folder, including

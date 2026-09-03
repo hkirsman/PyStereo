@@ -56,3 +56,9 @@
 **Context:** Torchvision 0.29+ registers C++ ops (`torchvision::nms` and friends) from `_C_stable` / `image_stable` extension modules loaded with `torch.ops.load_library`, not via a normal `import torchvision._C`. PyInstaller's module graph therefore ships the pure-Python package and silently omits those `.pyd` / `.so` files (and their sibling DLLs on Windows). The packaged web UI then returns 500 on `/api/stereo-methods` with `operator torchvision::nms does not exist` as soon as anything imports `pystereo_core.stereo` (which pulls in `segment.py` → `torchvision.transforms`).
 
 **Why not only lazy-import torchvision?** Listing methods would survive, but any depth method that runs BiRefNet would still crash. Bundling the native libs is the real fix; the helper is shared so batch and web stay in sync.
+
+## Windows packages install Taichi like macOS (2026-09-03)
+
+**Decision:** `compile-binaries-win.bat` runs `pip install taichi` (and fails the build if that cannot import). Both PyInstaller specs collect Taichi submodules, data files, and dynamic libs when the package is present.
+
+**Context:** macOS already did this; the Windows script did not, so Intel EXE builds on Python 3.14 shipped with no Taichi and the UI said GPU render was unavailable. Taichi wheels stop at 3.13, so the Windows script now errors instead of silently producing a torch-only zip. macOS still treats a failed Taichi install as optional (`|| echo fallback`) so an existing working Mac freeze path is unchanged.

@@ -23,6 +23,18 @@ if errorlevel 1 exit /b 1
 ".venv\Scripts\python.exe" -m pip install -q "PySide6-Essentials>=6.7.0"
 if errorlevel 1 exit /b 1
 
+echo Installing Taichi (SHARP taichi methods^)...
+".venv\Scripts\python.exe" -m pip install -q taichi
+if errorlevel 1 (
+  echo ERROR: taichi did not install. Windows packages need it for SHARP taichi methods.
+  echo Taichi ships wheels for Python 3.9-3.13 only. This .venv is:
+  ".venv\Scripts\python.exe" -c "import sys; print(sys.version)"
+  echo Install Python 3.13 ^(or 3.11^), delete the .venv folder, and re-run this script.
+  exit /b 1
+)
+".venv\Scripts\python.exe" -c "import taichi"
+if errorlevel 1 exit /b 1
+
 echo Initializing ml-sharp submodule (required for SHARP stereo methods^)...
 git submodule update --init ml-sharp
 if errorlevel 1 exit /b 1

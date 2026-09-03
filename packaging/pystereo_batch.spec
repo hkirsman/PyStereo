@@ -14,7 +14,12 @@
 import pathlib
 import sys
 
-from PyInstaller.utils.hooks import collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+    copy_metadata,
+)
 
 # Spec files are not on sys.path; load the helper next to this file.
 sys.path.insert(0, str(pathlib.Path(SPECPATH).resolve()))
@@ -57,10 +62,13 @@ except Exception:
     pass
 
 _taichi_hidden: list[str] = []
+_taichi_binaries: list = []
 try:
     _taichi_hidden = collect_submodules("taichi")
+    datas += collect_data_files("taichi")
+    _taichi_binaries = collect_dynamic_libs("taichi")
 except Exception:
-    pass
+    print("WARNING: taichi not collected - SHARP taichi methods will use torch.")
 
 hiddenimports = (
     collect_submodules("pystereo_core")
@@ -101,7 +109,7 @@ if not _tv_binaries:
 a = Analysis(
     [str(REPO / "packaging" / "entry_batch.py")],
     pathex=[str(REPO)],
-    binaries=merge_binaries([], _tv_binaries),
+    binaries=merge_binaries(_taichi_binaries, _tv_binaries),
     datas=datas,
     hiddenimports=hiddenimports
     + [
