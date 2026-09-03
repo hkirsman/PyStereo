@@ -56,7 +56,7 @@ No project test suite yet. Verify changes by running the web UI (`python app.py`
 4. **Inpainting** - LaMa (default) or AOT-GAN for disocclusion fill (`stereo/inpaint.py`)
 5. **SBS assembly** - left + right eye side-by-side JPEG (`stereo/pipeline.py`)
 
-SHARP methods skip depth estimation entirely - Apple SHARP predicts a 3D Gaussian splat and renders from two virtual cameras (`stereo/sharp_predict.py`, `stereo/splat_render.py`, `stereo/taichi_render.py`). The predictor stays resident between photos and unloads after 60 s idle (`PYSTEREO_SHARP_IDLE_S`). The `*_full` methods render entirely in Taichi - projection and compositing, no torch in the render path (`stereo/taichi_full.py`, `stereo/_taichi_full_kernels.py`).
+SHARP methods skip depth estimation entirely - Apple SHARP predicts a 3D Gaussian splat and renders from two virtual cameras (`stereo/sharp_predict.py`, `stereo/splat_render.py`, `stereo/taichi_render.py`). The predictor stays resident between photos and is never unloaded on a timer by default (`PYSTEREO_SHARP_IDLE_S`, 0 = keep loaded). The `*_full` methods render entirely in Taichi - projection and compositing, no torch in the render path (`stereo/taichi_full.py`, `stereo/_taichi_full_kernels.py`).
 
 ### Key modules
 
@@ -87,7 +87,7 @@ Methods report per-step timings via `stereo/timing.py:record_step` into the `int
 
 ### Settings
 
-User preferences persist in `settings.json` (gitignored). `StereoSettings` is a frozen dataclass with env-var overrides (`PYSTEREO_METHOD`, `PYSTEREO_INPAINT`, `PYSTEREO_MAX_DIM`, etc.) and per-method `SETTING_OVERRIDES`. `PYSTEREO_SHARP_IDLE_S` (default 60) sets how long the resident SHARP predictor survives idle before unloading; the web UI setting `sharp_idle_s` overrides it at runtime (0 = never unload).
+User preferences persist in `settings.json` (gitignored). `StereoSettings` is a frozen dataclass with env-var overrides (`PYSTEREO_METHOD`, `PYSTEREO_INPAINT`, `PYSTEREO_MAX_DIM`, etc.) and per-method `SETTING_OVERRIDES`. `PYSTEREO_SHARP_IDLE_S` (default 0 = never unload) sets how long the resident SHARP predictor survives idle before unloading; the web UI setting `sharp_idle_s` overrides it at runtime.
 
 ### Caches
 

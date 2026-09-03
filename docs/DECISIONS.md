@@ -27,11 +27,11 @@
 
 ## SHARP predictor stays resident between photos (2026-09-02)
 
-**Decision:** Cache the SHARP predictor in a module global after the first prediction and unload it after 60 s without use (`PYSTEREO_SHARP_IDLE_S` overrides).
+**Decision:** Cache the SHARP predictor in a module global after the first prediction and keep it there (`PYSTEREO_SHARP_IDLE_S` sets an idle unload timer; 0, the default, disables it).
 
 **Context:** `predict_gaussians` used to load the 2.8 GB checkpoint and delete the model on every photo, adding ~6-8 s per prediction. sharp-local (the sibling repo wrapping the same model) loads it once per process, which made it look faster for consecutive photos even though raw inference speed is identical (~11 s at 1536 on an M4).
 
-**Trade-off:** A resident predictor holds ~3 GB of unified memory. The idle timer gives both properties: consecutive photos (batch runs, a user iterating on settings) pay the load once, while a machine left idle gets the memory back after a minute. A timer that fires while a prediction is running reschedules itself instead of unloading mid-inference.
+**Trade-off:** A resident predictor holds ~3 GB of unified memory. A 60 s idle timer was the original default so a machine left alone got the memory back, but it made the common case the slow one: photos sent from a headset arrive minutes apart, so nearly every one paid the reload. Measured on cup.JPEG (2048x1536, sharp_splat_full): 24.8 s with the predictor resident against 49.3 s after an unload, the reload alone accounting for 28 s. The timer now defaults to off; a memory-constrained machine can set `sharp_idle_s` in the web UI. A timer that fires while a prediction is running reschedules itself instead of unloading mid-inference.
 
 ## "Disable cache" only bypasses the disk cache (2026-09-02)
 

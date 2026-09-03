@@ -28,10 +28,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: Seconds the resident predictor may sit unused before it is unloaded to
-#: free ~3 GB of (unified) memory. Loading it back costs ~6 s. Zero or a
-#: negative value keeps the predictor loaded until :func:`unload_predictor`.
+#: free ~3 GB of (unified) memory. Zero (the default) or a negative value
+#: keeps it loaded until :func:`unload_predictor`: reloading measured 28 s
+#: in the packaged app, which dwarfs the ~17 s prediction it precedes, and
+#: photos arriving minutes apart hit that path every time.
 #: Runtime changes go through :func:`set_idle_unload_s` (web UI setting).
-IDLE_UNLOAD_S = float(os.environ.get("PYSTEREO_SHARP_IDLE_S", "60"))
+IDLE_UNLOAD_S = float(os.environ.get("PYSTEREO_SHARP_IDLE_S", "0"))
 
 #: Upper bound for the on-disk Gaussian cache. Oldest entries (by last use)
 #: are evicted after each new prediction. Zero disables eviction.
