@@ -21,6 +21,7 @@ torch at module level); the render constants below mirror the values there.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 import numpy as np
@@ -38,25 +39,36 @@ ALPHA_MAX = 0.99
 MEDIAN_ALPHA = 0.5
 
 _available: bool | None = None
+_available_lock = threading.Lock()
 
 
 def is_full_taichi_available() -> bool:
-    """True when taichi is initialised and the projection kernel compiles."""
+    """True when taichi is initialised and the projection kernel compiles.
+
+    Cached under a lock for the same reason as
+    :func:`taichi_render.is_taichi_available`: publishing the result before
+    init finishes hands a concurrent caller a transient False and sends it
+    down the torch path.
+    """
     global _available
     if _available is not None:
         return _available
-    _available = False
-    try:
-        from pystereo_core.stereo.taichi_render import is_taichi_available
+    with _available_lock:
+        if _available is not None:
+            return _available
+        available = False
+        try:
+            from pystereo_core.stereo.taichi_render import is_taichi_available
 
-        if is_taichi_available():
-            from pystereo_core.stereo import _taichi_full_kernels
+            if is_taichi_available():
+                from pystereo_core.stereo import _taichi_full_kernels
 
-            _taichi_full_kernels.probe_kernels()
-            _available = True
-    except Exception as exc:
-        logger.info("Full-taichi renderer unavailable (%s)", exc)
-    return _available
+                _taichi_full_kernels.probe_kernels()
+                available = True
+        except Exception as exc:
+            logger.info("Full-taichi renderer unavailable (%s)", exc)
+        _available = available
+        return _available
 
 
 def _linear_to_srgb(x: np.ndarray) -> np.ndarray:
