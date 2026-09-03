@@ -88,17 +88,17 @@ class SharpScene:
     """Loaded SHARP Gaussian scene, ready for stereo rendering."""
 
     def __init__(self, npz_path: str) -> None:
-        d = np.load(npz_path)
         dev = _device()
-        f = lambda k: torch.from_numpy(d[k].astype(np.float32)).to(dev)
-        self.means = f("means")
-        self.scales = f("scales")
-        self.colors = f("colors")
-        self.opac = f("opacities")
-        self.rot = _quat_to_rot(f("quats"))
-        self.f_px = float(d["f_px"])
-        self.width = int(d["width"])
-        self.height = int(d["height"])
+        with np.load(npz_path) as d:
+            f = lambda k: torch.from_numpy(d[k].astype(np.float32)).to(dev)
+            self.means = f("means")
+            self.scales = f("scales")
+            self.colors = f("colors")
+            self.opac = f("opacities")
+            self.rot = _quat_to_rot(f("quats"))
+            self.f_px = float(d["f_px"])
+            self.width = int(d["width"])
+            self.height = int(d["height"])
         self.dev = dev
         s2 = torch.diag_embed(self.scales ** 2)
         self.cov3 = self.rot @ s2 @ self.rot.transpose(1, 2)

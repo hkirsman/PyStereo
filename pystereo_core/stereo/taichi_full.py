@@ -81,15 +81,15 @@ class TaichiScene:
     """A SHARP ``.npz`` scene rendered entirely with Taichi kernels."""
 
     def __init__(self, npz_path: str) -> None:
-        d = np.load(npz_path)
-        self.means = np.ascontiguousarray(d["means"].astype(np.float32))
-        self.scales = np.ascontiguousarray(d["scales"].astype(np.float32))
-        self.quats = np.ascontiguousarray(d["quats"].astype(np.float32))
-        self.colors = np.ascontiguousarray(d["colors"].astype(np.float32))
-        self.opac = np.ascontiguousarray(d["opacities"].astype(np.float32))
-        self.f_px = float(d["f_px"])
-        self.width = int(d["width"])
-        self.height = int(d["height"])
+        with np.load(npz_path) as d:
+            self.means = np.ascontiguousarray(d["means"].astype(np.float32))
+            self.scales = np.ascontiguousarray(d["scales"].astype(np.float32))
+            self.quats = np.ascontiguousarray(d["quats"].astype(np.float32))
+            self.colors = np.ascontiguousarray(d["colors"].astype(np.float32))
+            self.opac = np.ascontiguousarray(d["opacities"].astype(np.float32))
+            self.f_px = float(d["f_px"])
+            self.width = int(d["width"])
+            self.height = int(d["height"])
         self.n = len(self.opac)
 
     def render(
