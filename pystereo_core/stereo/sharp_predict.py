@@ -10,6 +10,7 @@ Requires ``ml-sharp`` (git submodule) and the SHARP checkpoint at
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import logging
 import os
@@ -101,6 +102,37 @@ def _spn_forward_any_size(self: torch.nn.Module, x: torch.Tensor) -> list[torch.
     x_lowres = cw(self, self.upsample_lowres, x_lowres)
     x_lowres = cw(self, self.fuse_lowres, torch.cat((x2_features, x_lowres), dim=1))
     return [x_latent0, x_latent1, x0_features, x1_features, x_lowres]
+
+
+_SPN_PATCH_LOCK = threading.Lock()
+_spn_patched = False
+
+
+def _ensure_spn_any_size_patch() -> None:
+    """Install the size-dispatching ``SlidingPyramidNetwork.forward`` once.
+
+    Patching only for a hi-res run and undoing it afterwards would race with a
+    concurrent prediction - the predictor is shared and only its *load* is
+    locked, inference is not - so the wrapper goes in once and stays: stock
+    1536 keeps upstream's forward, any other size takes ours.
+    """
+    global _spn_patched
+
+    from sharp.models.encoders import spn_encoder
+
+    with _SPN_PATCH_LOCK:
+        if _spn_patched:
+            return
+        original = spn_encoder.SlidingPyramidNetwork.forward
+
+        @functools.wraps(original)
+        def forward(self: torch.nn.Module, x: torch.Tensor) -> list[torch.Tensor]:
+            if x.shape[-1] == DEFAULT_INTERNAL:
+                return original(self, x)
+            return _spn_forward_any_size(self, x)
+
+        spn_encoder.SlidingPyramidNetwork.forward = forward  # type: ignore[method-assign]
+        _spn_patched = True
 
 
 # Resident SHARP predictor. The checkpoint takes ~6 s to load and the model
@@ -472,7 +504,6 @@ def predict_gaussians(
     from pystereo_core.sharp_imports import ensure_sharp_imports
 
     ensure_sharp_imports()
-    from sharp.models.encoders import spn_encoder
 
     validate_internal(internal)
 
@@ -515,7 +546,7 @@ def predict_gaussians(
     logger.info("SHARP predict: %dx%d, f_px=%.1f, internal=%d, device=%s", w, h, f_px, internal, device)
 
     if internal != DEFAULT_INTERNAL:
-        spn_encoder.SlidingPyramidNetwork.forward = _spn_forward_any_size  # type: ignore[method-assign]
+        _ensure_spn_any_size_patch()
     g = _predict_image(predictor, img, f_px, torch.device(device), internal=internal)
 
     # Write to a temp file and rename so an interrupted run (killed request,
