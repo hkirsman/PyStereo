@@ -4,7 +4,8 @@
 flask
 
 # Core ML runtime
-torch
+# torch 2.0+: torch.mps.empty_cache, torch.load(weights_only=True)
+torch>=2.0
 torchvision
 numpy
 opencv-contrib-python
