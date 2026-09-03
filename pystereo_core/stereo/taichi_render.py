@@ -25,6 +25,7 @@ fails, :func:`is_taichi_available` returns False and callers use torch.
 # annotations at runtime and cannot parse them as strings.
 import logging
 import sys
+import threading
 from typing import TYPE_CHECKING, Callable
 
 import numpy as np
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 _ti = None
 _ti_checked = False
+_ti_lock = threading.Lock()
 _kernels = None
 
 
@@ -49,32 +51,44 @@ def _load_kernels():
 
 
 def is_taichi_available() -> bool:
+    """True once Taichi is initialised and its kernels compile.
+
+    init takes seconds, and callers reach this from several threads at once
+    (a generation and ``GET /api/stereo-methods``, or the Qt GUI worker
+    beside the HTTP service). Hold a lock and publish ``_ti_checked`` only
+    after ``_ti`` is set, so a second thread waits for the real answer
+    instead of reading a half-finished init as "unavailable".
+    """
     global _ti, _ti_checked
     if _ti_checked:
         return _ti is not None
-    _ti_checked = True
-    try:
-        import taichi as ti
+    with _ti_lock:
+        if _ti_checked:
+            return _ti is not None
+        try:
+            import taichi as ti
 
-        from pystereo_core.registry import detect_device
+            from pystereo_core.registry import detect_device
 
-        # One device order for the whole project: MPS, then CUDA, then CPU.
-        arch = {"mps": ti.metal, "cuda": ti.cuda}.get(detect_device(), ti.cpu)
-        ti.init(arch=arch, log_level=ti.WARN)
-        _load_kernels().probe_kernels()
-        _ti = ti
-        logger.info("Taichi initialised (arch=%s)", arch)
-        return True
-    except Exception as exc:
-        if getattr(sys, "frozen", False):
-            logger.info(
-                "Taichi kernels unavailable in packaged app (%s); using torch fallback",
-                exc,
-            )
-        else:
-            logger.info("Taichi not available (%s); will use torch fallback", exc)
-        _ti = None
-        return False
+            # One device order for the whole project: MPS, then CUDA, then CPU.
+            arch = {"mps": ti.metal, "cuda": ti.cuda}.get(detect_device(), ti.cpu)
+            ti.init(arch=arch, log_level=ti.WARN)
+            _load_kernels().probe_kernels()
+            _ti = ti
+            logger.info("Taichi initialised (arch=%s)", arch)
+            return True
+        except Exception as exc:
+            if getattr(sys, "frozen", False):
+                logger.info(
+                    "Taichi kernels unavailable in packaged app (%s); using torch fallback",
+                    exc,
+                )
+            else:
+                logger.info("Taichi not available (%s); will use torch fallback", exc)
+            _ti = None
+            return False
+        finally:
+            _ti_checked = True
 
 
 def composite_ewa_taichi(
