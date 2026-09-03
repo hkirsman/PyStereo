@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from PIL import Image
 
 from pystereo_core.stereo.config import StereoSettings
 from pystereo_core.stereo.inpaint import InpaintBackend
+
+if TYPE_CHECKING:
+    from pystereo_core.stereo.pipeline import StereoPipeline
 
 
 class BaseStereoMethod(ABC):
@@ -37,6 +40,29 @@ class BaseStereoMethod(ABC):
     uses_taichi: ClassVar[bool] = False
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {}
+
+    #: Pipeline that built this instance, set by ``StereoPipeline._get_method``.
+    #: ``None`` when a method is used standalone (experiments, tests).
+    _owner: StereoPipeline | None = None
+
+    def nested_pipeline(self, settings: StereoSettings) -> StereoPipeline:
+        """Pipeline for a nested synthesis pass, reusing loaded models.
+
+        A method that needs a full depth-based pass (SHARP Depth, for one)
+        must go through this rather than construct a fresh
+        :class:`~pystereo_core.stereo.pipeline.StereoPipeline` - a new
+        pipeline gets its own BiRefNet and inpainter, reloading both on
+        every photo.
+
+        *settings* wins over the owner's own settings, so a method reached
+        through :meth:`StereoPipeline.derive` still runs at the derived
+        settings even though ``_owner`` points at the original pipeline.
+        """
+        from pystereo_core.stereo.pipeline import StereoPipeline
+
+        if self._owner is None:
+            return StereoPipeline(settings=settings)
+        return self._owner.with_settings(settings)
 
     @abstractmethod
     def warp_and_fill(

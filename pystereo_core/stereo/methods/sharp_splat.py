@@ -251,7 +251,7 @@ class SharpDepthMethod(_SharpBase):
         import cv2
 
         from pystereo_core.stereo.sharp_predict import cache_note, predict_gaussians
-        from pystereo_core.stereo.splat_render import SharpScene, linear_to_srgb
+        from pystereo_core.stereo.splat_render import SharpScene
 
         t0 = time.perf_counter()
         npz_path = predict_gaussians(
@@ -282,9 +282,7 @@ class SharpDepthMethod(_SharpBase):
         if intermediates is not None:
             intermediates["depth01"] = depth_01
 
-        from pystereo_core.stereo.pipeline import StereoPipeline
-
-        pipeline = StereoPipeline(settings=settings)
+        pipeline = self.nested_pipeline(settings)
         sbs = pipeline.synthesize(
             image, depth_01, method="per_eye_inpaint", intermediates=intermediates,
         )

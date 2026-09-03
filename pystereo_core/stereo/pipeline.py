@@ -122,6 +122,20 @@ class StereoPipeline:
         clone.settings = dc_replace(self.settings, **overrides)
         return clone
 
+    def with_settings(self, settings: StereoSettings) -> StereoPipeline:
+        """Like :meth:`derive`, but takes a whole ``StereoSettings``.
+
+        For callers that already hold a settings object instead of a set of
+        overrides - a stereo method running a nested pass, say. Falls back
+        to a fresh pipeline when *settings* asks for a different inpaint
+        backend, since the inpainter is shared rather than rebuilt.
+        """
+        if settings.inpaint_backend != self.settings.inpaint_backend:
+            return StereoPipeline(settings=settings)
+        clone = copy.copy(self)
+        clone.settings = settings
+        return clone
+
     def _ensure_segmenter(self) -> ForegroundSegmenter:
         if self._segmenter is None:
             self._segmenter = ForegroundSegmenter()
@@ -155,7 +169,10 @@ class StereoPipeline:
 
     def _get_method(self, name: str) -> BaseStereoMethod:
         if name not in self._methods:
-            self._methods[name] = get_method(name)
+            method = get_method(name)
+            # So a method needing a nested pass can reuse our loaded models.
+            method._owner = self
+            self._methods[name] = method
         return self._methods[name]
 
     def _preprocess(
