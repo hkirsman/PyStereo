@@ -231,6 +231,15 @@ _pipeline_singleton: Any = None
 _pipeline_lock = threading.Lock()
 
 
+def get_pipeline() -> Any:
+    """The pipeline this process shares. Used by the desktop GUI too.
+
+    The GUI's batch worker runs beside the service this module serves, so
+    both go through one pipeline and one set of resident weights.
+    """
+    return _get_pipeline()
+
+
 def _get_depth_estimator() -> Any:
     """Return the depth estimator from the registry, or None."""
     from pystereo_core.registry import get_registry
