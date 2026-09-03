@@ -38,7 +38,11 @@ def _forward_render(
     cy = (H - 1) / 2.0
     cx = cx0 + cx_shift
 
-    z = np.nan_to_num(depth, nan=float(np.nanmax(depth))).astype(np.float32)
+    # Holes take the farthest real distance. With no real distance at all,
+    # nanmax would be NaN (and warn), leaving every projected pixel NaN.
+    finite = depth[np.isfinite(depth) & (depth > 0)]
+    far = float(finite.max()) if finite.size else 1.0
+    z = np.nan_to_num(depth, nan=far, posinf=far, neginf=far).astype(np.float32)
     valid = z > 0.05
 
     u_grid, v_grid = np.meshgrid(
