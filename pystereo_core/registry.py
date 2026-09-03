@@ -274,10 +274,14 @@ class ModelRegistry:
 # ---------------------------------------------------------------------------
 
 _registry: Optional[ModelRegistry] = None
+_registry_lock = threading.Lock()
+
 
 def get_registry() -> ModelRegistry:
     """Return (or create) the global model registry."""
     global _registry
     if _registry is None:
-        _registry = ModelRegistry()
+        with _registry_lock:
+            if _registry is None:
+                _registry = ModelRegistry()
     return _registry
