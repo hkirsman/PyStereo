@@ -27,7 +27,10 @@ RenderMode = Literal["zbuf", "alpha", "alpha_taichi"]
 
 
 def _device() -> torch.device:
-    return torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    """Same MPS -> CUDA -> CPU order as every other model in the package."""
+    from pystereo_core.registry import detect_device
+
+    return torch.device(detect_device())
 
 
 def _quat_to_rot(q: torch.Tensor) -> torch.Tensor:
