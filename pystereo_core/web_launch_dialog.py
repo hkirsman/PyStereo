@@ -33,18 +33,31 @@ def browser_url(host: str, port: int) -> str:
     return f"http://{host}:{port}"
 
 
-def bind_host(host: str) -> str:
-    if host in ("0.0.0.0", "::", "[::]"):
-        return "127.0.0.1"
-    return host
-
-
 def port_is_free(host: str, port: int) -> bool:
-    """Return True when *host*/*port* can be bound for the Flask server."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    """Return True when *host*/*port* can be bound for the Flask server.
+
+    Probes the address the server will actually bind, picked the way
+    werkzeug picks it: IPv6 when *host* looks like an IPv6 address, then
+    the first ``getaddrinfo`` result for that family. A bind-all host stays
+    bind-all here - probing loopback instead would miss a conflict on
+    another interface, and would fail outright on an IPv6-only host.
+    """
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    try:
+        infos = socket.getaddrinfo(
+            host.strip("[]") or None,
+            port,
+            family,
+            socket.SOCK_STREAM,
+            flags=socket.AI_PASSIVE,
+        )
+    except socket.gaierror:
+        return True  # unresolvable host - let the server report the real error
+    family, socktype, proto, _canonname, addr = infos[0]
+    with socket.socket(family, socktype, proto) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            sock.bind((bind_host(host), port))
+            sock.bind(addr)
         except OSError:
             return False
     return True
