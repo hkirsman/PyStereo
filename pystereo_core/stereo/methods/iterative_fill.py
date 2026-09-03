@@ -46,7 +46,7 @@ def _iterative_patch_fill(
 ) -> None:
     """In-place iterative local-patch inpainting, back-to-front by depth.
 
-    Modifies *eye_img* directly — each filled region becomes visible
+    Modifies *eye_img* directly - each filled region becomes visible
     context for subsequent patches.
     """
     h, w = occ_mask.shape[:2]

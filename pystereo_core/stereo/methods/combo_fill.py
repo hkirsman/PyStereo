@@ -1,11 +1,11 @@
-"""Method 6: Combo Fill — per-strip AOT-GAN (best of Methods 4 + 5).
+"""Method 6: Combo Fill - per-strip AOT-GAN (best of Methods 4 + 5).
 
 Combines the two strongest ideas:
 
-- **From Method 4 (direct_fill):** per-strip anisotropic crop inpainting —
+- **From Method 4 (direct_fill):** per-strip anisotropic crop inpainting -
   each wide disocclusion strip gets a tight crop so the model only sees
   immediately adjacent background texture.
-- **From Method 5 (clean_fill):** AOT-GAN instead of LaMa — no dark bias
+- **From Method 5 (clean_fill):** AOT-GAN instead of LaMa - no dark bias
   (model sees original pixels, not zero-filled) and no global texture
   cloning (dilated convolutions, not FFCs).
 

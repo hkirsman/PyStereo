@@ -145,7 +145,7 @@ class LamaInpaintBackend(InpaintBackend):
 class AotGanInpaintBackend(InpaintBackend):
     """AOT-GAN inpainting (Apache 2.0).
 
-    Uses dilated convolutions (not FFCs) — no global receptive field, no
+    Uses dilated convolutions (not FFCs) - no global receptive field, no
     zero-initialization dark bias.  Weights must already be present in the
     local HuggingFace cache (downloaded by pystereo_core.download); this
     backend never hits the Hub at runtime.
@@ -245,7 +245,7 @@ class AotGanInpaintBackend(InpaintBackend):
 
 
 class FluxInpaintBackend(InpaintBackend):
-    """Experimental FLUX Fill inpainting — **not Apache 2.0** (BFL non-commercial license)."""
+    """Experimental FLUX Fill inpainting - **not Apache 2.0** (BFL non-commercial license)."""
 
     def inpaint(self, image_rgb: np.ndarray, occlusion_mask: np.ndarray) -> np.ndarray:
         raise RuntimeError(

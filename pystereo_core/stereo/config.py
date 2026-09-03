@@ -19,7 +19,7 @@ class StereoSettings:
     """Tunable stereo synthesis parameters.
 
     Defaults here are a neutral baseline.  Each stereo method declares
-    ``SETTING_OVERRIDES`` which are applied on top — see
+    ``SETTING_OVERRIDES`` which are applied on top - see
     :func:`from_env` and :meth:`with_method_defaults`.
     """
 

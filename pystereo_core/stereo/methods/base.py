@@ -81,7 +81,7 @@ class BaseStereoMethod(ABC):
         rgb_arr:
             ``(H, W, 3)`` uint8 RGB source image (processing resolution).
         depth_f32:
-            ``(H, W)`` float32 depth in ``[0, 1]`` — already healed,
+            ``(H, W)`` float32 depth in ``[0, 1]`` - already healed,
             guided-filtered, and gamma-corrected.
         max_disp:
             Maximum horizontal separation at nearest depth (pixels).
@@ -96,9 +96,9 @@ class BaseStereoMethod(ABC):
         Returns
         -------
         left:
-            ``(H, W, 3)`` uint8 RGB — left eye view, holes filled.
+            ``(H, W, 3)`` uint8 RGB - left eye view, holes filled.
         right:
-            ``(H, W, 3)`` uint8 RGB — right eye view, holes filled.
+            ``(H, W, 3)`` uint8 RGB - right eye view, holes filled.
         """
 
     def synthesize(
@@ -153,12 +153,12 @@ class BaseStereoMethod(ABC):
         Returns
         -------
         left:
-            ``(H, W, 3)`` uint8 RGB — left eye, holes are black.
+            ``(H, W, 3)`` uint8 RGB - left eye, holes are black.
         right:
-            ``(H, W, 3)`` uint8 RGB — right eye, holes are black.
+            ``(H, W, 3)`` uint8 RGB - right eye, holes are black.
         left_mask:
-            ``(H, W)`` uint8 — 255 = hole, 0 = valid.
+            ``(H, W)`` uint8 - 255 = hole, 0 = valid.
         right_mask:
-            ``(H, W)`` uint8 — 255 = hole, 0 = valid.
+            ``(H, W)`` uint8 - 255 = hole, 0 = valid.
         """
         return None

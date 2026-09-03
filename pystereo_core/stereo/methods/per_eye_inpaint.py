@@ -1,4 +1,4 @@
-"""Method 1: Per-Eye Inpaint — inverse remap warp + independent LaMa fill.
+"""Method 1: Per-Eye Inpaint - inverse remap warp + independent LaMa fill.
 
 Each eye is warped via pure inverse ``cv2.remap`` with stretch-based
 occlusion detection, then inpainted independently.  Simple and fast,

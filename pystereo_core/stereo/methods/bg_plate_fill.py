@@ -1,4 +1,4 @@
-"""Method 2: Background-Plate Fill — hybrid z-buffer warp + stereo-consistent fill.
+"""Method 2: Background-Plate Fill - hybrid z-buffer warp + stereo-consistent fill.
 
 Builds a single inpainted "background plate" (foreground removed from the
 source image), warps it with background-depth parallax into both eyes,
@@ -152,7 +152,7 @@ class BgPlateFillMethod(BaseStereoMethod):
     ) -> np.ndarray | None:
         """Build a uint8 mask of foreground regions to inpaint away.
 
-        Returns ``None`` when the mask covers >70 % of the image —
+        Returns ``None`` when the mask covers >70 % of the image -
         the caller falls back to per-eye inpainting.
         """
         if fg_mask is not None:

@@ -1,16 +1,16 @@
-"""Stereo warping primitives — all strategies live here.
+"""Stereo warping primitives - all strategies live here.
 
 Three warp implementations are available:
 
-1. ``inverse_remap_warp_eye``  — Pure inverse ``cv2.remap`` with continuous
+1. ``inverse_remap_warp_eye``  - Pure inverse ``cv2.remap`` with continuous
    flow maps and stretch-based occlusion detection.  Used by
    :class:`~pystereo_core.stereo.methods.per_eye_inpaint.PerEyeInpaintMethod`.
 
-2. ``hybrid_zbuf_remap_eye``  — Vectorised forward z-buffer (clean occlusion
+2. ``hybrid_zbuf_remap_eye``  - Vectorised forward z-buffer (clean occlusion
    boundaries) + backward ``cv2.remap`` (sub-pixel sampling).  Used by
    :class:`~pystereo_core.stereo.methods.bg_plate_fill.BgPlateFillMethod`.
 
-3. ``forward_splat_eye``  — Legacy row-loop forward splatting.  Kept for
+3. ``forward_splat_eye``  - Legacy row-loop forward splatting.  Kept for
    reference / debugging only.
 """
 
@@ -133,7 +133,7 @@ def inverse_remap_warp_eye(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Warp via pure inverse ``cv2.remap`` with stretch-based occlusion.
 
-    Returns ``(warped, occlusion_mask)`` — 255 = hole.
+    Returns ``(warped, occlusion_mask)`` - 255 = hole.
     """
     if image.ndim != 3 or image.shape[2] != 3:
         raise ValueError(f"Expected H×W×3 RGB image, got shape {image.shape}")
@@ -176,7 +176,7 @@ def hybrid_zbuf_remap_eye(
     2. Backward remap: use z-buffer depth to compute exact sub-pixel source
        column, sample with bilinear interpolation.
 
-    Returns ``(warped, occlusion_mask)`` — 255 = hole.
+    Returns ``(warped, occlusion_mask)`` - 255 = hole.
     """
     if image.ndim != 3 or image.shape[2] != 3:
         raise ValueError(f"Expected H×W×3 RGB image, got shape {image.shape}")

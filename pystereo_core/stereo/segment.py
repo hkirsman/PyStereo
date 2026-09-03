@@ -1,7 +1,7 @@
 """Semantic foreground segmentation using BiRefNet (Apache 2.0).
 
 Generates a high-resolution float32 alpha mask that captures fine details
-like hair, fur, and translucent edges — areas where monocular depth models
+like hair, fur, and translucent edges - areas where monocular depth models
 (e.g. Depth Anything V2) often produce hard 90-degree cutoffs.
 """
 

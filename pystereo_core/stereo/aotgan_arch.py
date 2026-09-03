@@ -1,4 +1,4 @@
-"""AOT-GAN InpaintGenerator — vendored from researchmm/AOT-GAN-for-Inpainting.
+"""AOT-GAN InpaintGenerator - vendored from researchmm/AOT-GAN-for-Inpainting.
 
 Original repository: https://github.com/researchmm/AOT-GAN-for-Inpainting
 License: Apache-2.0

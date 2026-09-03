@@ -1,4 +1,4 @@
-"""Method 3: Width-Routed Fill — narrow-strip CPU propagation + bg-plate LaMa.
+"""Method 3: Width-Routed Fill - narrow-strip CPU propagation + bg-plate LaMa.
 
 Routes disocclusion holes by width after unilateral mask dilation:
 
@@ -6,7 +6,7 @@ Routes disocclusion holes by width after unilateral mask dilation:
   mirroring adjacent background pixels from the geometrically correct side.
   No neural network, no dark bias, exact photographic texture.
 - **Wide** (> threshold): filled via stereo-consistent bg-plate with
-  **anisotropic banded inpainting** — the source image is split into
+  **anisotropic banded inpainting** - the source image is split into
   independent horizontal crops so LaMa's FFCs only see local vertical
   context.  Per-band colour matching + sharpen + Poisson seam blending.
 
@@ -213,15 +213,15 @@ def _inpaint_banded(
 ) -> np.ndarray:
     """Inpaint via independent horizontal crops to limit LaMa's vertical context.
 
-    Each band is a physically separate inference — FFCs can only see
+    Each band is a physically separate inference - FFCs can only see
     textures within the band height (~300-400 px).  Bands are
     feather-blended in overlap zones.  Colour matching is applied
     per-band with local context before stitching.
 
     Key differences from the reverted sequential-strip approach
     (see STEREO_STATUS.md "Attempted and reverted"):
-    - Bands are *independent* — no sequential tonal drift.
-    - Input is *physically cropped* — FFCs cannot reach distant textures
+    - Bands are *independent* - no sequential tonal drift.
+    - Input is *physically cropped* - FFCs cannot reach distant textures
       even though they have a global receptive field within each crop.
     """
     h, w = rgb_arr.shape[:2]
@@ -336,7 +336,7 @@ class RoutedFillMethod(BaseStereoMethod):
         """Build a bg plate via banded inpainting, warp, paste, Poisson blend.
 
         Uses ``_inpaint_banded`` to split the source image into
-        independent horizontal crops — each LaMa inference only sees
+        independent horizontal crops - each LaMa inference only sees
         local vertical context, preventing cross-material texture cloning.
 
         Returns ``True`` on success, ``False`` if the bg plate could not

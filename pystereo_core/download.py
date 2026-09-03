@@ -2,7 +2,7 @@
 
 Downloads HuggingFace / URL artifacts when the user enables AI stereo,
 exposing thread-safe progress for the dashboard and Quest clients.
-Inference paths must never trigger Hub downloads — only this manager does.
+Inference paths must never trigger Hub downloads - only this manager does.
 """
 
 from __future__ import annotations
@@ -367,7 +367,7 @@ def _make_progress_tqdm(
     import threading as _threading
 
     class _ProgressTqdm:
-        # tqdm.contrib.concurrent.ensure_lock may ``del cls._lock`` — use getattr.
+        # tqdm.contrib.concurrent.ensure_lock may ``del cls._lock`` - use getattr.
         _lock: Optional[_threading.RLock] = None
 
         @classmethod
@@ -560,7 +560,7 @@ class ModelDownloadManager:
         """Remove cached stereo-pack weights from disk and reset pack state.
 
         Refuses while a download is in progress. Does not change the
-        ``enable_ai_stereo`` config flag — callers disable that separately.
+        ``enable_ai_stereo`` config flag - callers disable that separately.
         """
         with self._lock:
             if self._pack_state == "downloading":
@@ -864,7 +864,7 @@ class ModelDownloadManager:
                 if art.state == "ready":
                     self._job_bytes_done += art.bytes_total or self._exact_bytes(spec)
                     continue
-                # Waiting in line — not actively downloading yet.
+                # Waiting in line - not actively downloading yet.
                 art.state = "queued"
                 art.percent = 0
                 art.error = None

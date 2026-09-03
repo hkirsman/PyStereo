@@ -1,4 +1,4 @@
-"""Method 7: LDI Inpaint — Context-aware neural inpainting (CVPR 2020).
+"""Method 7: LDI Inpaint - Context-aware neural inpainting (CVPR 2020).
 
 Uses the three specialised partial-convolution networks from "3D Photography
 using Context-aware Layered Depth Inpainting" (Shih et al.) to fill
@@ -220,19 +220,19 @@ def _run_ldi_inpaint(
     t_context = _to_t(c_context)
     t_edge = _to_t(c_edge)
 
-    # Stage 1: Edge inpainting — hallucinate depth edges in the hole
+    # Stage 1: Edge inpainting - hallucinate depth edges in the hole
     edge_out = models["edge"].forward_3P(
         t_mask, t_context, t_rgb, t_disp, t_edge, device=device
     )
     merged_edge = t_edge * (1 - t_mask) + edge_out * t_mask
     merged_edge = (merged_edge > 0.5).float()
 
-    # Stage 2: Depth inpainting — fill depth guided by edges
+    # Stage 2: Depth inpainting - fill depth guided by edges
     depth_out = models["depth"].forward_3P(
         t_mask, t_context, t_depth, merged_edge, device=device
     )
 
-    # Stage 3: Color inpainting — fill RGB guided by edges
+    # Stage 3: Color inpainting - fill RGB guided by edges
     color_out = models["color"].forward_3P(
         t_mask, t_context, t_rgb, merged_edge, device=device
     )
@@ -289,7 +289,7 @@ class LdiInpaintMethod(BaseStereoMethod):
         1. Delegate to BgPlateFillMethod for the initial warp + fill
            (LaMa handles large background-plate fills well).
         2. Refine each eye's disocclusion strips with the LDI partial-
-           convolution networks — these small, edge-adjacent fills are
+           convolution networks - these small, edge-adjacent fills are
            exactly what the networks were trained for.
         """
         # Stage 1: standard bg_plate_fill for the bulk warp + fill

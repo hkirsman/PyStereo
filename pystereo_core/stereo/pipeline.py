@@ -334,7 +334,7 @@ class StereoPipeline:
         image:
             Source RGB photo.
         depth_map:
-            Grayscale depth — PIL ``L`` (uint8, 255 = closest) or
+            Grayscale depth - PIL ``L`` (uint8, 255 = closest) or
             float32 ndarray ``(H, W)`` in [0, 1] (1.0 = closest).
         divergence_ratio:
             Optional override for max separation as fraction of width.

@@ -1,4 +1,4 @@
-"""Method 5: Clean Fill — AOT-GAN per-eye inpainting (no LaMa workarounds).
+"""Method 5: Clean Fill - AOT-GAN per-eye inpainting (no LaMa workarounds).
 
 Uses AOT-GAN (Apache 2.0) instead of LaMa for inpainting.  AOT-GAN uses
 dilated convolutions (not FFCs) and sees the original image in masked
@@ -6,7 +6,7 @@ regions (not zero-filled), eliminating the two core LaMa issues:
 
 - **No dark bias:** input is ``[image, mask]``, not ``image * (1 - mask)``
 - **No global texture cloning:** dilated convolutions have a large but
-  local receptive field — they can't reach distant textures
+  local receptive field - they can't reach distant textures
 
 Because the model doesn't need workarounds, the pipeline is simpler:
 hybrid warp → unilateral dilation → AOT-GAN inpaint per eye → Poisson
