@@ -13,4 +13,15 @@ def _version_file() -> Path:
     return Path(__file__).resolve().parent.parent / "version.txt"
 
 
-__version__: str = _version_file().read_text(encoding="utf-8").strip()
+def _read_version() -> str:
+    path = _version_file()
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        # Both specs bundle version.txt, but a partial build should not stop
+        # the app: the version only labels windows, logs and the About line.
+        print(f"PyStereo: no version file at {path}", file=sys.stderr)
+        return "0.0.0+unknown"
+
+
+__version__: str = _read_version()
