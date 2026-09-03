@@ -55,14 +55,11 @@ def is_taichi_available() -> bool:
     _ti_checked = True
     try:
         import taichi as ti
-        import torch
 
-        if torch.cuda.is_available():
-            arch = ti.cuda
-        elif torch.backends.mps.is_available():
-            arch = ti.metal
-        else:
-            arch = ti.cpu
+        from pystereo_core.registry import detect_device
+
+        # One device order for the whole project: MPS, then CUDA, then CPU.
+        arch = {"mps": ti.metal, "cuda": ti.cuda}.get(detect_device(), ti.cpu)
         ti.init(arch=arch, log_level=ti.WARN)
         _load_kernels().probe_kernels()
         _ti = ti
