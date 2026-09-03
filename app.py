@@ -629,9 +629,8 @@ def api_settings_put() -> Any:
             overrides: dict[str, Any] = {}
             if "method" in saved:
                 method_raw = (str(saved["method"]) or "").strip().lower()
-                from pystereo_core.stereo.config import StereoMethodName
-                valid_methods = StereoMethodName.__args__  # type: ignore[attr-defined]
-                if method_raw in valid_methods:
+                from pystereo_core.stereo.methods import available_methods
+                if method_raw in available_methods():
                     overrides["stereo_method"] = method_raw
             if "max_dim" in saved:
                 try:

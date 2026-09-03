@@ -7,7 +7,7 @@ from dataclasses import dataclass, fields, replace
 from typing import Any, Literal
 
 InpaintBackendName = Literal["lama", "opencv", "none", "flux", "aotgan"]
-StereoMethodName = Literal["per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill", "sharp_splat", "sharp_detail", "sharp_hires", "sharp_alpha", "sharp_alpha_taichi", "sharp_depth", "sharp_mesh", "sharp_taichi"]
+StereoMethodName = Literal["per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill", "sharp_splat", "sharp_splat_full", "sharp_detail", "sharp_hires", "sharp_alpha", "sharp_alpha_full", "sharp_alpha_taichi", "sharp_depth", "sharp_mesh", "sharp_taichi"]
 DepthModelSize = Literal["small", "base", "large"]
 
 DEFAULT_METHOD: StereoMethodName = "per_eye_inpaint"
@@ -74,9 +74,13 @@ class StereoSettings:
         Apply primary env vars, then method ``SETTING_OVERRIDES``, then
         optional tuning env overrides.
         """
+        from pystereo_core.stereo.methods import available_methods
+
         method_raw = method or os.environ.get("PYSTEREO_METHOD", "").strip().lower()
         stereo_method: StereoMethodName = DEFAULT_METHOD
-        if method_raw in ("per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill", "sharp_splat", "sharp_detail", "sharp_hires", "sharp_alpha", "sharp_alpha_taichi", "sharp_depth", "sharp_mesh", "sharp_taichi"):
+        # The registry, not the Literal above, decides what is selectable so
+        # a new method file cannot be missed here.
+        if method_raw and method_raw in available_methods():
             stereo_method = method_raw  # type: ignore[assignment]
 
         backend_raw = os.environ.get("PYSTEREO_INPAINT", "lama").strip().lower()
