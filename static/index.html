@@ -156,6 +156,21 @@
             </div>
             </div>
           </details>
+
+          <details class="cache-panel" id="servicePanel">
+            <summary>Integration service</summary>
+            <div class="cache-body">
+            <div class="settings-row">
+              <label class="settings-check" for="serviceEnabledCheck">
+                <input type="checkbox" id="serviceEnabledCheck" />
+                <span>Enable service endpoint</span>
+              </label>
+              <span class="settings-note">Off by default. The web UI does not need it.</span>
+              <span class="cache-note">Lets other programs on this machine send a photo to this app and get the stereo pair back, using the method and settings chosen above. Nothing is sent anywhere else.</span>
+              <span class="cache-path" id="serviceUrl"></span>
+            </div>
+            </div>
+          </details>
         </section>
 
         <section class="panel panel-output" aria-label="Output">

@@ -33,8 +33,12 @@ python -m pystereo_core --cli --folder /path --recursive  # CLI batch mode
 ### HTTP service
 
 Both the web UI and desktop GUI expose:
-- `GET /health` - `{"status": "ok", "kind": "stereo"}`
+- `GET /health` - `{"ok": true, "kind": "stereo"}`
 - `POST /transform` - accepts JPEG/PNG upload, returns SBS JPEG. Optional form fields: `method`, `depth_model`, `max_dim`, `max_pixels`
+
+Off by default (`/health` 503, `/transform` 403). Enabled by the web UI
+setting `service_enabled`, `PYSTEREO_SERVICE=1`, or the desktop GUI's
+"Start server" button (`app.force_service_enabled`).
 
 Headless: `python app.py --host 127.0.0.1 --port 8766`
 

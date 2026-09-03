@@ -515,9 +515,11 @@ class PyStereoQtWindow(QMainWindow):
         self._log_line("Starting server on http://127.0.0.1:8766 ...")
 
         def _run_server() -> None:
-            from app import app, set_gui_log_sink
+            from app import app, force_service_enabled, set_gui_log_sink
 
             set_gui_log_sink(lambda msg: self._bridge.server_log.emit(msg))
+            # The user pressed "Start server": that is the opt-in.
+            force_service_enabled(True)
 
             import logging as _logging
 

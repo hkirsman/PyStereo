@@ -85,6 +85,8 @@ _USER_SETTINGS_KEYS = frozenset({
     "depth_model", "max_dim", "method",
     # Cache & memory (see the "Cache & memory" panel in the web UI)
     "disable_cache", "sharp_cache_max_mb", "outputs_keep", "sharp_idle_s",
+    # Integration service (POST /transform for other programs)
+    "service_enabled",
 })
 
 #: Result folders kept under ``outputs/`` (oldest are pruned after each run).
@@ -130,6 +132,31 @@ def _save_user_settings(data: dict[str, Any]) -> None:
     p = _settings_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+
+
+#: Set by hosts that start the server on the user's explicit request (the
+#: desktop GUI's "Start server" button), which counts as enabling it.
+_service_forced = False
+
+
+def force_service_enabled(enabled: bool) -> None:
+    global _service_forced
+    _service_forced = bool(enabled)
+
+
+def _service_enabled() -> bool:
+    """Whether other programs may call ``POST /transform``.
+
+    Off by default. Turned on by the web UI setting ``service_enabled``, the
+    ``PYSTEREO_SERVICE=1`` environment variable, or a host that called
+    ``force_service_enabled``. The web UI itself never needs it.
+    """
+    if _service_forced:
+        return True
+    env = os.environ.get("PYSTEREO_SERVICE", "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    return _setting_bool(_load_user_settings(), "service_enabled")
 
 
 _cache_settings_applied = False
@@ -414,12 +441,22 @@ def health() -> Any:
     """Media service readiness probe."""
     from pystereo_core._version import __version__ as VERSION
 
+    if not _service_enabled():
+        return jsonify({
+            "ok": False,
+            "kind": "stereo",
+            "name": "pystereo",
+            "version": VERSION,
+            "service_enabled": False,
+            "error": "Integration service is off. Enable it in the PyStereo web UI.",
+        }), 503
     status = _model_status_payload()
     return jsonify({
         "ok": True,
         "kind": "stereo",
         "name": "pystereo",
         "version": VERSION,
+        "service_enabled": True,
         "model_ready": status.get("state") == "ready",
         "model_state": status.get("state"),
     })
@@ -436,6 +473,7 @@ def api_health() -> Any:
         "ok": True,
         "app": "pystereo-web",
         "version": VERSION,
+        "service_enabled": _service_enabled(),
         "model_ready": status.get("state") == "ready",
         "model_state": status.get("state"),
         "device": registry.device,
@@ -886,6 +924,10 @@ def api_stereo_methods() -> Any:
 @app.route("/transform", methods=["POST"])
 def transform() -> Any:
     """Media service endpoint: JPEG in, SBS JPEG bytes out."""
+    if not _service_enabled():
+        return jsonify({
+            "error": "Integration service is off. Enable it in the PyStereo web UI.",
+        }), 403
     if "file" not in request.files:
         return jsonify({"error": "Missing file field"}), 400
     upload = request.files["file"]

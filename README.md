@@ -66,8 +66,14 @@ python -m pystereo_core --cli --folder /path/to/photos --recursive
 
 The web UI and the desktop GUI both expose HTTP endpoints for integration:
 
-- `GET /health` - returns `{"status": "ok", "kind": "stereo"}`
+- `GET /health` - returns `{"ok": true, "kind": "stereo"}`
 - `POST /transform` - accepts a JPEG/PNG upload, returns an SBS JPEG
+
+The service is off by default: `/health` answers 503 and `/transform` 403
+until it is enabled. Turn it on under "Integration service" in the web UI
+(`service_enabled` in `settings.json`), with `PYSTEREO_SERVICE=1` for
+headless runs, or with the desktop GUI's "Start server" button. The web UI
+itself never uses these endpoints.
 
 Optional `/transform` form fields: `method`, `depth_model`, `max_dim`
 (processing resolution), `max_pixels` and `no_cache`. `max_pixels` caps the

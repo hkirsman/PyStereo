@@ -652,6 +652,10 @@ body.model-gate-active .app-shell > .layout {
   display: none;
 }
 
+#serviceUrl {
+  white-space: pre-line;
+}
+
 .cache-label {
   font-size: 0.8rem;
   color: var(--muted);

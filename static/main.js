@@ -43,6 +43,8 @@ const btnUnloadModels = $("#btnUnloadModels");
 const sharpCacheMaxInput = $("#sharpCacheMaxInput");
 const outputsKeepInput = $("#outputsKeepInput");
 const sharpIdleInput = $("#sharpIdleInput");
+const serviceEnabledCheck = $("#serviceEnabledCheck");
+const serviceUrl = $("#serviceUrl");
 const cacheSharpPath = $("#cacheSharpPath");
 const cacheOutputsPath = $("#cacheOutputsPath");
 let lastCacheStats = null;
@@ -441,6 +443,7 @@ function saveSettings() {
       max_dim: parseInt(maxDimSlider.value, 10),
       method: methodSelect.value,
       disable_cache: disableCacheCheck.checked,
+      service_enabled: serviceEnabledCheck.checked,
     };
     // Only send cache limits once they have been populated from the server,
     // so an early save cannot overwrite them with blanks.
@@ -480,6 +483,7 @@ async function loadSettings() {
     if (s.method && methodMeta[s.method]) methodSelect.value = s.method;
     else if (methodSelect.options.length) methodSelect.value = defaultMethodName;
     disableCacheCheck.checked = !!s.disable_cache;
+    serviceEnabledCheck.checked = !!s.service_enabled;
     updateMethodInfo();
     updateDepthDownloadBtn();
   } catch {
@@ -606,6 +610,8 @@ for (const input of [sharpCacheMaxInput, outputsKeepInput, sharpIdleInput]) {
 }
 
 disableCacheCheck.addEventListener("change", saveSettings);
+serviceEnabledCheck.addEventListener("change", saveSettings);
+serviceUrl.textContent = "POST " + window.location.origin + "/transform\nGET  " + window.location.origin + "/health";
 
 maxDimSlider.addEventListener("input", () => {
   maxDimValue.textContent = maxDimSlider.value;
