@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from abc import ABC, abstractmethod
 
 import cv2
@@ -75,10 +76,18 @@ class LamaInpaintBackend(InpaintBackend):
 
     def __init__(self) -> None:
         self._model: object | None = None
+        self._load_lock = threading.Lock()
 
     def _ensure_loaded(self) -> object:
+        """Load the weights once, even under concurrent first calls."""
         if self._model is not None:
             return self._model
+        with self._load_lock:
+            if self._model is None:
+                self._load_model()
+        return self._model
+
+    def _load_model(self) -> None:
         try:
             from simple_lama_inpainting import SimpleLama
             from simple_lama_inpainting.models.model import download_model, LAMA_MODEL_URL
@@ -108,7 +117,6 @@ class LamaInpaintBackend(InpaintBackend):
         lama.model = model
         lama.device = device
         self._model = lama
-        return self._model
 
     def is_loaded(self) -> bool:
         return self._model is not None
@@ -156,11 +164,18 @@ class AotGanInpaintBackend(InpaintBackend):
     def __init__(self) -> None:
         self._model: object | None = None
         self._device: object | None = None
+        self._load_lock = threading.Lock()
 
     def _ensure_loaded(self) -> tuple[object, object]:
+        """Load the weights once, even under concurrent first calls."""
         if self._model is not None:
             return self._model, self._device
+        with self._load_lock:
+            if self._model is None:
+                self._load_model()
+        return self._model, self._device
 
+    def _load_model(self) -> None:
         import torch
         from huggingface_hub import hf_hub_download
 
@@ -187,7 +202,6 @@ class AotGanInpaintBackend(InpaintBackend):
 
         self._model = model
         self._device = device
-        return model, device
 
     def is_loaded(self) -> bool:
         return self._model is not None

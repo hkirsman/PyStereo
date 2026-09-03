@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import threading
 import time
 from dataclasses import replace as dc_replace
 from typing import Any, NamedTuple
@@ -69,6 +70,7 @@ class _SharedModels:
         self.inpainter = inpainter
         self.segmenter: ForegroundSegmenter | None = None
         self.methods: dict[str, BaseStereoMethod] = {}
+        self.load_lock = threading.Lock()
 
 
 class StereoPipeline:
@@ -138,7 +140,9 @@ class StereoPipeline:
 
     def _ensure_segmenter(self) -> ForegroundSegmenter:
         if self._segmenter is None:
-            self._segmenter = ForegroundSegmenter()
+            with self._shared.load_lock:
+                if self._segmenter is None:
+                    self._segmenter = ForegroundSegmenter()
         return self._segmenter
 
     def segmenter_loaded(self) -> bool:

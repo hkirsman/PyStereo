@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import threading
 from typing import Any
 
 import numpy as np
@@ -29,11 +30,17 @@ class ForegroundSegmenter:
         self._model: Any = None
         self._device: torch.device = torch.device("cpu")
         self._transform: transforms.Compose | None = None
+        self._load_lock = threading.Lock()
 
     def _ensure_loaded(self) -> None:
+        """Load BiRefNet once, even if several threads ask at the same time."""
         if self._model is not None:
             return
+        with self._load_lock:
+            if self._model is None:
+                self._load_model()
 
+    def _load_model(self) -> None:
         from transformers import AutoModelForImageSegmentation
 
         from pystereo_core.registry import detect_device
