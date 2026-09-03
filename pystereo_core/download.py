@@ -97,12 +97,6 @@ SHARP_SPEC = ArtifactSpec(
 )
 
 
-def _sharp_cache_path() -> Path:
-    from torch.hub import get_dir
-
-    return Path(get_dir()) / "checkpoints" / SHARP_CKPT_FILENAME
-
-
 def _lama_cache_path(url: str) -> Path:
     """Mirror ``simple_lama_inpainting`` cache layout under torch hub checkpoints."""
     from urllib.parse import urlparse

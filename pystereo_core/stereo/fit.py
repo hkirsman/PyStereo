@@ -51,9 +51,9 @@ def fit_to_pixel_budget(
         w = max(1, int(w * scale))
         h = max(1, int(h * scale))
 
-    if even_width and w % 2:
+    if even_width and w % 2 and w > 1:
         w -= 1
 
     if (w, h) != img.size:
-        img = img.resize((max(1, w), max(1, h)), Image.Resampling.LANCZOS)
+        img = img.resize((w, h), Image.Resampling.LANCZOS)
     return img
