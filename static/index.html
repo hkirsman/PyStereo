@@ -119,15 +119,18 @@
 
           <details class="cache-panel" id="cachePanel">
             <summary>Cache &amp; memory</summary>
+            <div class="cache-body">
             <div class="cache-row">
               <span class="cache-label">SHARP predictions</span>
               <span class="cache-value" id="cacheSharpValue">-</span>
-              <button type="button" class="btn btn-secondary btn-sm" id="btnClearSharp" title="Delete cached SHARP predictions (.sharp_cache).">Clear</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnClearSharp" title="Delete cached SHARP predictions (sharp_*.npz files in the folder below).">Clear</button>
+              <span class="cache-path" id="cacheSharpPath"></span>
             </div>
             <div class="cache-row">
               <span class="cache-label">Results</span>
               <span class="cache-value" id="cacheOutputsValue">-</span>
-              <button type="button" class="btn btn-secondary btn-sm" id="btnClearOutputs" title="Delete generated results (outputs/).">Clear</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnClearOutputs" title="Delete generated results (result folders in the folder below).">Clear</button>
+              <span class="cache-path" id="cacheOutputsPath"></span>
             </div>
             <div class="cache-row">
               <span class="cache-label">In memory</span>
@@ -148,8 +151,9 @@
               <span class="settings-label">Unload SHARP after</span>
               <input type="number" id="sharpIdleInput" class="settings-number" min="0" step="30" aria-label="Seconds of idle time before the SHARP predictor unloads" />
               <span class="settings-unit">s idle, 0 = keep loaded</span>
+              <span class="cache-note">Loading SHARP into memory takes a while, so the model stays resident after the first run. It unloads after this much idle time to give the memory back to the system.</span>
             </div>
-            <p class="hint" id="cachePaths"></p>
+            </div>
           </details>
         </section>
 

@@ -42,7 +42,9 @@ const btnUnloadModels = $("#btnUnloadModels");
 const sharpCacheMaxInput = $("#sharpCacheMaxInput");
 const outputsKeepInput = $("#outputsKeepInput");
 const sharpIdleInput = $("#sharpIdleInput");
-const cachePaths = $("#cachePaths");
+const cacheSharpPath = $("#cacheSharpPath");
+const cacheOutputsPath = $("#cacheOutputsPath");
+let lastCacheStats = null;
 const btnGenerate = $("#btnGenerate");
 const statusWrap = $("#statusWrap");
 const statusBar = $("#statusBar");
@@ -495,6 +497,7 @@ function fillNumberInput(input, value) {
 
 function renderCacheStats(data) {
   if (!data) return;
+  lastCacheStats = data;
   const sharp = data.sharp || {};
   const outputs = data.outputs || {};
   cacheSharpValue.textContent = sharp.error
@@ -510,10 +513,22 @@ function renderCacheStats(data) {
   fillNumberInput(sharpCacheMaxInput, sharp.max_mb);
   fillNumberInput(outputsKeepInput, data.outputs_keep);
   fillNumberInput(sharpIdleInput, data.sharp_idle_s);
-  const paths = [];
-  if (sharp.path) paths.push("SHARP cache: " + sharp.path);
-  if (outputs.path) paths.push("Results: " + outputs.path);
-  cachePaths.textContent = paths.join("\n");
+  cacheSharpPath.textContent = sharp.path || "";
+  cacheOutputsPath.textContent = outputs.path || "";
+}
+
+function confirmClear(stats, what, unit, detail, consequence) {
+  // Refuse to delete anything the server did not name a folder for.
+  if (!stats || !stats.path) {
+    setStatus("Cache folder unknown - nothing deleted.", false, true);
+    return false;
+  }
+  const count = stats.files || 0;
+  return confirm(
+    "Delete " + count + " " + what + " " + unit + (count === 1 ? "" : "s") +
+    " (" + fmtBytes(stats.bytes || 0) + ")?\n\n" +
+    "Folder: " + stats.path + "\n" + detail + "\n\n" + consequence
+  );
 }
 
 async function loadCacheStats() {
@@ -552,7 +567,12 @@ async function postCacheAction(url, body, button) {
 }
 
 btnClearSharp.addEventListener("click", async () => {
-  if (!confirm("Delete all cached SHARP predictions? The next run of each photo will predict again.")) return;
+  const stats = lastCacheStats && lastCacheStats.sharp;
+  if (!confirmClear(
+    stats, "cached SHARP prediction", "file",
+    "Only sharp_*.npz files directly in this folder are removed.",
+    "The next run of each photo will predict again."
+  )) return;
   const data = await postCacheAction("/api/cache/clear", { target: "sharp" }, btnClearSharp);
   if (data && data.deleted && data.deleted.sharp) {
     setStatus("SHARP cache cleared (" + fmtBytes(data.deleted.sharp.deleted_bytes) + ")", false, false);
@@ -560,7 +580,12 @@ btnClearSharp.addEventListener("click", async () => {
 });
 
 btnClearOutputs.addEventListener("click", async () => {
-  if (!confirm("Delete all generated results? Images shown in the Output panel will stop loading.")) return;
+  const stats = lastCacheStats && lastCacheStats.outputs;
+  if (!confirmClear(
+    stats, "generated result", "folder",
+    "Only the result folders inside it are removed.",
+    "Images shown in the Output panel will stop loading."
+  )) return;
   const data = await postCacheAction("/api/cache/clear", { target: "outputs" }, btnClearOutputs);
   if (data && data.deleted && data.deleted.outputs) {
     setStatus("Results cleared (" + fmtBytes(data.deleted.outputs.deleted_bytes) + ")", false, false);

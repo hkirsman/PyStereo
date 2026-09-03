@@ -571,10 +571,14 @@ body.model-gate-active .app-shell > .layout {
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-sm);
   background: #0d0d0d;
-  padding: 0.5rem 0.75rem;
+  padding: 0.6rem 0.9rem 0.75rem;
+}
+
+.cache-body {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.9rem;
+  padding-top: 0.7rem;
 }
 
 .cache-panel summary {
@@ -601,25 +605,50 @@ body.model-gate-active .app-shell > .layout {
 }
 
 .cache-panel:not([open]) {
-  gap: 0;
+  padding-bottom: 0.6rem;
 }
 
-.cache-panel .hint {
-  white-space: pre-line;
+.cache-panel .settings-label {
+  min-width: 9.5rem;
+}
+
+.cache-body .settings-row {
+  row-gap: 0.35rem;
+}
+
+.cache-note {
+  flex-basis: 100%;
+  font-size: 0.72rem;
+  color: #7a7a7a;
+  line-height: 1.35;
 }
 
 .cache-row {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  row-gap: 0.35rem;
   flex-wrap: wrap;
+}
+
+.cache-path {
+  flex-basis: 100%;
+  font-size: 0.7rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #5c5c5c;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.cache-path:empty {
+  display: none;
 }
 
 .cache-label {
   font-size: 0.8rem;
   color: var(--muted);
   white-space: nowrap;
-  min-width: 8.5rem;
+  min-width: 9.5rem;
 }
 
 .cache-value {
