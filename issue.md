@@ -7,7 +7,7 @@ Add stereo synthesis via Apple SHARP - turn a single photo into a 3D Gaussian sp
 | Method | Description |
 |--------|-------------|
 | `sharp_splat` | Pure splat renders from both cameras. Correct parallax everywhere, slightly soft (SHARP works at 1536^2). |
-| `sharp_detail` | Same geometry, but colour is re-sampled from the original photo wherever the original camera could see that surface (~95% of pixels). Full photo sharpness, splat colour only in the disoccluded band. |
+| `sharp_detail` | Same geometry, but colour is re-sampled from the original photo wherever the original camera could see that surface (most pixels). Full photo sharpness, splat colour only in the disoccluded band. |
 | `sharp_hires` | `sharp_detail` with SHARP run at 2688^2 (1344^2 Gaussian grid, 3.6 M Gaussians). Tighter silhouettes. ~5x slower prediction. Experimental - outside SHARP's training resolution. |
 | `sharp_alpha` | `sharp_hires` with proper 3DGS alpha compositing (depth-sorted per pixel, front-to-back blend). Cleanest silhouettes. ~2 min per photo on M-series (per-pixel sort in torch). |
 | `sharp_alpha_taichi` | Same output as `sharp_alpha`, rendered by a taichi tile rasteriser on Metal/GPU. Render step drops from ~2 min to under a second. Needs `pip install taichi` (Python <= 3.13); falls back to torch otherwise. |

@@ -7,7 +7,7 @@ Two variants that bypass the depth-map pipeline entirely:
   (SHARP works at 1536^2).
 - ``sharp_detail``: same geometry, but colour is re-sampled from the
   original photo wherever the original camera could see that surface
-  (~95% of pixels); splat colour only in the disoccluded band.
+  (most pixels); splat colour only in the disoccluded band.
 - ``sharp_hires``: sharp_detail with SHARP run at 2688^2 (1344^2 grid).
 - ``sharp_alpha``: sharp_hires with depth-sorted alpha compositing.
 - ``sharp_alpha_taichi``: sharp_alpha via the taichi tile rasteriser.
@@ -148,7 +148,7 @@ class SharpDetailMethod(_SharpBase):
     description: ClassVar[str] = (
         "Same SHARP splat geometry as sharp_splat, but colour is "
         "re-sampled from the original photo wherever the original camera "
-        "could see that surface (~99%% of pixels). Full photo sharpness, "
+        "could see that surface (most pixels). Full photo sharpness, "
         "same 3D geometry. Research-only license."
     )
     ui_info: ClassVar[str] = (
