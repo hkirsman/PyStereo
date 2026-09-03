@@ -84,7 +84,7 @@ per photo, 20-60 MB each) and web UI results in `outputs/`. The "Cache &
 memory" panel in the web UI shows both sizes, clears either one, and sets
 the limits (`sharp_cache_max_mb`, least recently used entries are evicted
 after each prediction, default 2048; `outputs_keep`, latest N results,
-default 200; 0 disables either). The same panel sets how long the resident
+default 10; 0 disables either). The same panel sets how long the resident
 SHARP predictor survives idle (`sharp_idle_s`, 0 keeps it loaded) and can
 unload every model right away. The "Disable cache" checkbox next to
 Generate skips reading `.sharp_cache/` for that run - the stages panel then

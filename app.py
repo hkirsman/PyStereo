@@ -88,7 +88,10 @@ _USER_SETTINGS_KEYS = frozenset({
 })
 
 #: Result folders kept under ``outputs/`` (oldest are pruned after each run).
-DEFAULT_OUTPUTS_KEEP = 200
+#: Only the run on screen is ever read back; older folders are just history
+#: on disk. TODO: add a way to browse past results in the web UI, then a
+#: larger default would earn its space.
+DEFAULT_OUTPUTS_KEEP = 10
 
 
 def _setting_int(saved: dict[str, Any], key: str, default: int, minimum: int = 0) -> int:
