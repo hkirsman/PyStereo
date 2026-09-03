@@ -150,7 +150,9 @@ class WebLaunchWindow(QWidget):
                 self._show_server_error(err)
                 return
         try:
-            with urllib.request.urlopen(f"{self._url}/health", timeout=1.5) as resp:
+            # /api/health, not /health: the latter is the integration service
+            # probe and answers 503 while the service endpoint is off (default).
+            with urllib.request.urlopen(f"{self._url}/api/health", timeout=1.5) as resp:
                 if resp.status == 200:
                     self._show_server_ok()
                     return
@@ -236,7 +238,7 @@ def run_server_with_launch_dialog(
             if server_error:
                 return
             try:
-                with urllib.request.urlopen(f"{url}/health", timeout=2.0) as resp:
+                with urllib.request.urlopen(f"{url}/api/health", timeout=2.0) as resp:
                     if resp.status != 200:
                         return
             except (urllib.error.URLError, TimeoutError, OSError):
