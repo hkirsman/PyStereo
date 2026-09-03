@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+import sys
 import threading
 import urllib.error
 import urllib.request
@@ -63,16 +64,36 @@ def port_is_free(host: str, port: int) -> bool:
     return True
 
 
+def _port_conflict_help(port: int) -> tuple[str, str]:
+    """Where to find the other instance, and how to kill it, on this platform."""
+    if sys.platform == "win32":
+        return (
+            "Task Manager",
+            "From Command Prompt:\n"
+            f"  netstat -ano | findstr :{port}\n"
+            "  taskkill /PID <pid> /F",
+        )
+    if sys.platform == "darwin":
+        return (
+            "Dock icon or Activity Monitor",
+            f"From Terminal:\n  lsof -ti :{port} | xargs kill",
+        )
+    return (
+        "your system monitor",
+        f"From a terminal:\n  lsof -ti :{port} | xargs kill",
+    )
+
+
 def ensure_port_available(host: str, port: int, *, gui: bool = True) -> None:
     """Exit with a clear message when another instance already owns the port."""
     if port_is_free(host, port):
         return
+    where, how = _port_conflict_help(port)
     message = (
         f"Port {port} is already in use.\n\n"
         "Quit the other PyStereo Web instance first "
-        "(Dock icon or Activity Monitor), then try again.\n\n"
-        "From Terminal:\n"
-        f"  lsof -ti :{port} | xargs kill"
+        f"({where}), then try again.\n\n"
+        f"{how}"
     )
     logger.error("Cannot start PyStereo Web: port %d already in use", port)
     if gui:
