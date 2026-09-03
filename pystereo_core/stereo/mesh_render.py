@@ -72,13 +72,17 @@ def _forward_render(
     holes = ~filled
     if holes.any():
         kernel = np.ones((3, 3), np.uint8)
+        # Grow the coverage mask alongside the colour. Testing out.sum() > 0
+        # instead would read a warped pure-black pixel as a hole and let the
+        # next dilation overwrite it, eating a ring off every dark region.
+        covered = filled.astype(np.uint8)
         for _ in range(6):
-            dilated = cv2.dilate(out, kernel, iterations=1)
-            out[holes] = dilated[holes]
-            filled = out.sum(axis=-1) > 0
-            holes = ~filled
+            out[holes] = cv2.dilate(out, kernel, iterations=1)[holes]
+            covered = cv2.dilate(covered, kernel, iterations=1)
+            holes = covered == 0
             if not holes.any():
                 break
+        filled = covered.astype(bool)
 
     return out, ~filled
 
