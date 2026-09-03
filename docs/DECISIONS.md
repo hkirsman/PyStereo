@@ -48,3 +48,11 @@
 **Context:** `splat_render.py` imports torch at module level. The point of the full-taichi path is a render path with no torch in it - usable later in a torch-free packaged viewer. Importing the constants would silently drag torch back in. The mirror is marked "keep in sync" in both files; the compositing kernels themselves are shared (`_taichi_kernels.py`), so outputs stay pixel-identical to the torch-projection paths.
 
 **Reminder for frozen builds:** Taichi compiles kernels by reading Python source, so every kernel module must be at module scope and listed in the PyInstaller spec `datas` (`_taichi_kernels.py`, `_taichi_full_kernels.py`). A new kernels file that is not added to both specs will silently fall back to torch in the packaged app.
+
+## Torchvision native libs must be forced into PyInstaller bundles (2026-09-03)
+
+**Decision:** Both PyInstaller specs call `packaging/torchvision_binaries.py:collect_torchvision_binaries` and pass the results as `Analysis(binaries=...)`.
+
+**Context:** Torchvision 0.29+ registers C++ ops (`torchvision::nms` and friends) from `_C_stable` / `image_stable` extension modules loaded with `torch.ops.load_library`, not via a normal `import torchvision._C`. PyInstaller's module graph therefore ships the pure-Python package and silently omits those `.pyd` / `.so` files (and their sibling DLLs on Windows). The packaged web UI then returns 500 on `/api/stereo-methods` with `operator torchvision::nms does not exist` as soon as anything imports `pystereo_core.stereo` (which pulls in `segment.py` → `torchvision.transforms`).
+
+**Why not only lazy-import torchvision?** Listing methods would survive, but any depth method that runs BiRefNet would still crash. Bundling the native libs is the real fix; the helper is shared so batch and web stay in sync.
