@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 import torch
 
-from pystereo_core.stereo.notes import disparity_px
+from pystereo_core.stereo.notes import converge_distance, disparity_px
 
 R_MAX = 7
 HARD_T = 0.35
@@ -413,10 +413,7 @@ def render_stereo(
 
     c_rgb, d0, _ = scene.render(0.0, 0.0, mode=mode)
     if converge_m is None:
-        if subject_mask is not None and subject_mask.any():
-            converge_m = float(np.nanmedian(d0[subject_mask]))
-        else:
-            converge_m = float(np.nanpercentile(d0, 10))
+        converge_m = converge_distance(d0, subject_mask)
 
     shift = f * baseline_m / (2 * converge_m)
     l_rgb, l_d, l_h = scene.render(-baseline_m / 2, -shift, mode=mode)

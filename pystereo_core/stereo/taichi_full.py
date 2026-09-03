@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from pystereo_core.stereo.notes import disparity_px
+from pystereo_core.stereo.notes import converge_distance, disparity_px
 
 logger = logging.getLogger(__name__)
 
@@ -186,10 +186,7 @@ def render_stereo_taichi(
 
     c_rgb, d0, _ = scene.render(0.0, 0.0, mode=mode)
     if converge_m is None:
-        if subject_mask is not None and subject_mask.any():
-            converge_m = float(np.nanmedian(d0[subject_mask]))
-        else:
-            converge_m = float(np.nanpercentile(d0, 10))
+        converge_m = converge_distance(d0, subject_mask)
 
     shift = f * baseline_m / (2 * converge_m)
     l_rgb, l_d, l_h = scene.render(-baseline_m / 2, -shift, mode=mode)
