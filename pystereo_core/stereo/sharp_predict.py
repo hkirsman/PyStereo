@@ -14,6 +14,7 @@ import functools
 import hashlib
 import logging
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -48,7 +49,22 @@ SHARP_CKPT_URL = (
     + SHARP_CKPT_FILENAME
 )
 
-_DEFAULT_CACHE = Path(__file__).resolve().parent.parent.parent / ".sharp_cache"
+def _default_cache_dir() -> Path:
+    """Gaussian cache root: per-user data dir when frozen, repo root in dev.
+
+    A frozen build's ``__file__`` lives inside the app bundle, which is
+    read-only in the usual install locations - and writing there would
+    break the code signature anyway. Keep the cache next to outputs and
+    settings instead.
+    """
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        from pystereo_core.logging_config import pystereo_data_dir
+
+        return pystereo_data_dir() / ".sharp_cache"
+    return Path(__file__).resolve().parent.parent.parent / ".sharp_cache"
+
+
+_DEFAULT_CACHE = _default_cache_dir()
 _CACHE_GLOB = "sharp_*.npz"
 
 DEFAULT_INTERNAL = 1536

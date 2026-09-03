@@ -28,7 +28,7 @@ from flask import Flask, Response, jsonify, request, send_file
 from werkzeug.exceptions import HTTPException
 from PIL import Image
 
-from pystereo_core.logging_config import ensure_stderr_info_logging
+from pystereo_core.logging_config import ensure_stderr_info_logging, pystereo_data_dir
 
 ensure_stderr_info_logging(log_file_name="pystereo-web.log")
 
@@ -49,23 +49,7 @@ def _bundle_root() -> Path:
 
 def _outputs_dir() -> Path:
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        if sys.platform == "darwin":
-            return (
-                Path.home()
-                / "Library"
-                / "Application Support"
-                / "PyStereo"
-                / "outputs"
-            )
-        if sys.platform == "win32":
-            local = os.environ.get("LOCALAPPDATA")
-            if local:
-                return Path(local) / "PyStereo" / "outputs"
-            return Path.home() / "AppData" / "Local" / "PyStereo" / "outputs"
-        xdg = os.environ.get("XDG_DATA_HOME")
-        if xdg:
-            return Path(xdg) / "pystereo" / "outputs"
-        return Path.home() / ".local" / "share" / "pystereo" / "outputs"
+        return pystereo_data_dir() / "outputs"
     return _dev_root() / "outputs"
 
 
