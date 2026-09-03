@@ -379,6 +379,14 @@ body.model-gate-active .app-shell > .layout {
   line-height: 1.35;
 }
 
+.settings-note-full {
+  flex-basis: 100%;
+}
+
+.settings-row:has(> .settings-note-full) {
+  row-gap: 0.35rem;
+}
+
 .settings-number {
   width: 6rem;
   padding: 0.4rem 0.55rem;

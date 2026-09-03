@@ -90,12 +90,13 @@
             </div>
           </div>
 
-          <div class="settings-row">
+          <div class="settings-row" id="maxDimRow">
             <span class="settings-label">Max dim</span>
             <div class="settings-slider-wrap">
               <input type="range" id="maxDimSlider" class="settings-slider" min="512" max="4096" step="128" value="2048" />
               <span id="maxDimValue" class="settings-value">2048</span>
             </div>
+            <span class="settings-note settings-note-full">Working resolution for depth-map methods: bigger photos are downscaled to this longest side before healing, warping, and inpainting, and each eye comes out at this size. Higher keeps more detail but LaMa inpainting needs far more memory. SHARP methods ignore it and render at the photo's own size.</span>
           </div>
 
           <div class="settings-row">
@@ -115,7 +116,7 @@
             </div>
           </div>
 
-          <p class="hint">Inference runs locally via Python (PyTorch). Download AI models above if prompted.</p>
+          <p class="hint">Everything runs on this machine - photos never leave it. Model weights download on first use when prompted above.</p>
 
           <details class="cache-panel" id="cachePanel">
             <summary>Cache &amp; memory</summary>

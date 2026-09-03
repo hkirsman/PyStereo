@@ -30,6 +30,7 @@ const sharpBannerText = $(".sharp-banner-text");
 const btnDownloadSharp = $("#btnDownloadSharp");
 const btnCancelSharp = $("#btnCancelSharp");
 const btnRemoveSharp = $("#btnRemoveSharp");
+const maxDimRow = $("#maxDimRow");
 const maxDimSlider = $("#maxDimSlider");
 const maxDimValue = $("#maxDimValue");
 const disableCacheCheck = $("#disableCacheCheck");
@@ -656,6 +657,7 @@ function updateMethodInfo() {
     methodInfo.hidden = false;
   }
   depthModelRow.hidden = !selectedMethodNeedsDepth();
+  maxDimRow.hidden = !selectedMethodNeedsDepth();
 }
 
 function selectedMethodNeedsDepth() {
