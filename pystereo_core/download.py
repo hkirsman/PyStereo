@@ -826,7 +826,9 @@ class ModelDownloadManager:
                 self._error = None
                 self._message = f"{spec.name} download cancelled"
                 art = self._artifacts.get(spec.id)
-                if art:
+                # A re-request can land while this thread is winding down.
+                # Leave its "queued" state alone; the finally starts it.
+                if art and art.state != "queued":
                     art.state = "absent"
                     art.percent = 0
                     art.bytes_downloaded = 0
@@ -844,8 +846,9 @@ class ModelDownloadManager:
                     art.error = str(exc)
             self.refresh_local_state()
         finally:
-            if spec.id != SHARP_SPEC.id:
-                self._start_queued_sharp()
+            # Also when this job was SHARP: cancelling it and asking again
+            # queues a second SHARP run, and nothing else would start it.
+            self._start_queued_sharp()
 
     def ensure_stereo_pack_async(self) -> None:
         """Start a background download if the pack is not already ready."""
