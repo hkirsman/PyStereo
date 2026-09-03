@@ -12,8 +12,11 @@ Add stereo synthesis via Apple SHARP - turn a single photo into a 3D Gaussian sp
 | `sharp_alpha` | `sharp_hires` with proper 3DGS alpha compositing (depth-sorted per pixel, front-to-back blend). Cleanest silhouettes. ~2 min per photo on M-series (per-pixel sort in torch). |
 | `sharp_alpha_taichi` | Same output as `sharp_alpha`, rendered by a taichi tile rasteriser on Metal/GPU. Render step drops from ~2 min to under a second. Needs `pip install taichi` (Python <= 3.13); falls back to torch otherwise. |
 | `sharp_depth` | Renders SHARP's scene to extract a metric depth map, then feeds it through the existing warp+inpaint pipeline (`per_eye_inpaint`). Better depth than Depth Anything, familiar warp look. |
+| `sharp_taichi` | Same z-buffer EWA splatting as `sharp_splat`, with compositing on Metal/GPU via taichi (5-10x faster). Falls back to the torch renderer when taichi is missing. |
+| `sharp_splat_full` | `sharp_taichi` with the whole render path - projection and compositing - in taichi kernels, no torch in the renderer. Both eyes in about a second. |
+| `sharp_alpha_full` | The `sharp_alpha` look with the whole render path in taichi, at the standard 1536 resolution. Both eyes in about a second; SHARP prediction is then the only real cost. |
 
-`sharp_mesh` and `sharp_taichi` are also included but marked deprecated (forward mesh rendering and zbuf-mode taichi, respectively - superseded by the alpha methods above).
+`sharp_mesh` is also included but marked deprecated (forward mesh rendering, superseded by the alpha methods above).
 
 All SHARP methods are `needs_depth=False` (except `sharp_depth` which uses depth as an intermediate) - they bypass the depth model download entirely.
 
