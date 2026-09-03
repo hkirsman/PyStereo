@@ -16,6 +16,10 @@ import sys
 
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
+# Spec files are not on sys.path; load the helper next to this file.
+sys.path.insert(0, str(pathlib.Path(SPECPATH).resolve()))
+from torchvision_binaries import collect_torchvision_binaries, merge_binaries  # noqa: E402
+
 block_cipher = None
 
 REPO = pathlib.Path(SPECPATH).resolve().parent
@@ -88,12 +92,23 @@ hiddenimports = (
     ]
 )
 
+# Torchvision 0.29+ ops live in _C_stable / image_stable extensions loaded via
+# torch.ops.load_library - PyInstaller does not discover them as imports.
+_tv_binaries = collect_torchvision_binaries()
+if not _tv_binaries:
+    print("WARNING: no torchvision native libs found - stereo methods may fail at runtime.")
+
 a = Analysis(
     [str(REPO / "packaging" / "entry_batch.py")],
     pathex=[str(REPO)],
-    binaries=[],
+    binaries=merge_binaries([], _tv_binaries),
     datas=datas,
-    hiddenimports=hiddenimports,
+    hiddenimports=hiddenimports
+    + [
+        "torchvision",
+        "torchvision.transforms",
+        "torchvision.extension",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
