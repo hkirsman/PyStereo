@@ -102,11 +102,11 @@ def _run_synthesis(
     method = getattr(args, "method", None)
 
     if method:
-        from pystereo_core.stereo.methods import get_method
-
-        # argparse validated the name, so a failure here is a real error -
-        # wrapping it in RuntimeError sent it down main()'s LaMa retry path.
-        stereo_method = get_method(method)
+        # Through the pipeline, so a method running a nested pass (sharp_depth)
+        # reuses the models this pipeline already holds. argparse validated the
+        # name, so a failure here is a real error - wrapping it in RuntimeError
+        # sent it down main()'s LaMa retry path.
+        stereo_method = pipeline._get_method(method)
         if not stereo_method.needs_depth:
             return pipeline._synthesize_no_depth(rgb, stereo_method, method)
 
