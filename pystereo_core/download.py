@@ -737,9 +737,12 @@ class ModelDownloadManager:
                     art.bytes_downloaded = 0
                     art.error = None
                 return {"cancelled": True}
+            # _cancel_requested is shared by the one worker thread, so only
+            # raise it when SHARP is what that worker is on. Raising it while
+            # the pack or a depth model downloads would cancel that instead.
             alive = self._thread is not None and self._thread.is_alive()
             downloading = art is not None and art.state == "downloading"
-            if not alive and not downloading:
+            if not (alive and downloading):
                 return {"cancelled": False, "reason": "not_downloading"}
             self._cancel_requested = True
             self._message = "Cancelling SHARP download..."
