@@ -10,6 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 from pystereo_core.stereo.config import InpaintBackendName, StereoSettings
+from pystereo_core.stereo.methods import available_methods
 from pystereo_core.stereo.pipeline import StereoPipeline
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--method",
         type=str,
         default=None,
-        help="Stereo method (default: per_eye_inpaint). SHARP methods: sharp_splat, sharp_splat_full, sharp_detail, sharp_hires, sharp_alpha, sharp_alpha_full, sharp_alpha_taichi, sharp_depth, sharp_mesh, sharp_taichi.",
+        choices=sorted(available_methods()),
+        help="Stereo method (default: per_eye_inpaint)",
     )
     parser.add_argument(
         "--no-heal",
@@ -101,10 +103,10 @@ def _run_synthesis(
 
     if method:
         from pystereo_core.stereo.methods import get_method
-        try:
-            stereo_method = get_method(method)
-        except ValueError as exc:
-            raise RuntimeError(f"Unknown stereo method: {method}") from exc
+
+        # argparse validated the name, so a failure here is a real error -
+        # wrapping it in RuntimeError sent it down main()'s LaMa retry path.
+        stereo_method = get_method(method)
         if not stereo_method.needs_depth:
             return pipeline._synthesize_no_depth(rgb, stereo_method, method)
 

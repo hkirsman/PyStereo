@@ -172,6 +172,14 @@ def _cli_main() -> int:
     if args.folder is None:
         p.error("--folder is required unless --download-model or --remove-model")
 
+    if args.method is not None:
+        from pystereo_core.stereo.methods import available_methods
+
+        known = sorted(available_methods())
+        if args.method not in known:
+            p.error(f"argument --method: invalid choice: {args.method!r} "
+                    f"(choose from {', '.join(known)})")
+
     root = args.folder.expanduser().resolve()
     if not root.is_dir():
         print(f"Not a directory: {root}", file=sys.stderr)
