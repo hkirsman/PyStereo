@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 import torch
 
-from pystereo_core.stereo.notes import converge_distance, disparity_px
+from pystereo_core.stereo.notes import converge_distance, depth_to_01, disparity_px
 
 R_MAX = 7
 HARD_T = 0.35
@@ -42,23 +42,6 @@ def _quat_to_rot(q: torch.Tensor) -> torch.Tensor:
         2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
         2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y),
     ], dim=-1).reshape(-1, 3, 3)
-
-
-def _depth_to_01(depth: np.ndarray) -> np.ndarray:
-    """Normalise a metric depth buffer to [0, 1] via inverse depth.
-
-    Handles NaN (holes) and zero/negative depth (invalid) by mapping them
-    to the farthest valid distance.
-    """
-    valid = np.isfinite(depth) & (depth > 0)
-    if not valid.any():
-        return np.zeros_like(depth, dtype=np.float32)
-    inv = np.zeros_like(depth)
-    inv[valid] = 1.0 / depth[valid]
-    far = float(inv[valid].min())
-    inv[~valid] = far
-    lo, hi = far, float(inv[valid].max())
-    return ((inv - lo) / max(hi - lo, 1e-6)).astype(np.float32)
 
 
 def linear_to_srgb(x: np.ndarray) -> np.ndarray:
@@ -436,7 +419,7 @@ def render_stereo(
         right, r_h = detail_transfer(
             photo, r_rgb, r_d, d0, f, +baseline_m / 2, +shift,
         )
-        depth01 = _depth_to_01(l_d)
+        depth01 = depth_to_01(l_d)
         zn = float(np.nanpercentile(l_d, 1))
         zf = float(np.nanpercentile(l_d, 99))
         return {
@@ -456,7 +439,7 @@ def render_stereo(
             },
         }
 
-    depth01 = _depth_to_01(l_d)
+    depth01 = depth_to_01(l_d)
     zn = float(np.nanpercentile(l_d, 1))
     zf = float(np.nanpercentile(l_d, 99))
     return {

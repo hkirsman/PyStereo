@@ -28,6 +28,7 @@ from PIL import Image
 from pystereo_core.stereo.config import StereoSettings
 from pystereo_core.stereo.inpaint import InpaintBackend
 from pystereo_core.stereo.methods.base import BaseStereoMethod
+from pystereo_core.stereo.notes import converge_distance, depth_to_01
 from pystereo_core.stereo.splat_render import RenderMode
 from pystereo_core.stereo.timing import record_step
 
@@ -267,13 +268,7 @@ class SharpDepthMethod(_SharpBase):
         _, center_depth, _ = scene.render(0.0, 0.0)
         record_step(intermediates, "Depth render", time.perf_counter() - t0)
 
-        valid = np.isfinite(center_depth) & (center_depth > 0)
-        inv_d = np.zeros_like(center_depth)
-        inv_d[valid] = 1.0 / center_depth[valid]
-        lo, hi = float(inv_d[valid].min()), float(inv_d[valid].max())
-        depth_01 = (inv_d - lo) / max(hi - lo, 1e-6)
-        depth_01[~valid] = 0.0
-        depth_01 = depth_01.astype(np.float32)
+        depth_01 = depth_to_01(center_depth)
 
         w_img, h_img = image.size
         if depth_01.shape != (h_img, w_img):
@@ -341,10 +336,7 @@ class SharpMeshMethod(_SharpBase):
         if fg_mask is not None:
             subject_mask = fg_mask > 0.5
 
-        if subject_mask is not None and subject_mask.any():
-            converge_m = float(np.nanmedian(center_depth[subject_mask]))
-        else:
-            converge_m = float(np.nanpercentile(center_depth, 10))
+        converge_m = converge_distance(center_depth, subject_mask)
 
         rgb = np.asarray(image.convert("RGB"))
         t0 = time.perf_counter()
@@ -356,13 +348,7 @@ class SharpMeshMethod(_SharpBase):
         record_step(intermediates, "Mesh render", time.perf_counter() - t0)
 
         if intermediates is not None:
-            valid = np.isfinite(center_depth) & (center_depth > 0)
-            inv_d = np.zeros_like(center_depth)
-            inv_d[valid] = 1.0 / center_depth[valid]
-            lo, hi = float(inv_d[valid].min()), float(inv_d[valid].max())
-            depth_01 = (inv_d - lo) / max(hi - lo, 1e-6)
-            depth_01[~valid] = 0.0
-            intermediates["depth01"] = depth_01.astype(np.float32)
+            intermediates["depth01"] = depth_to_01(center_depth)
 
         logger.info(
             "SHARP mesh: converge=%.2fm",
@@ -427,10 +413,7 @@ class SharpTaichiMethod(_SharpBase):
             subject_mask = fg_mask > 0.5
 
         center_rgb, d0, _ = scene.render(0.0, 0.0)
-        if subject_mask is not None and subject_mask.any():
-            converge_m = float(np.nanmedian(d0[subject_mask]))
-        else:
-            converge_m = float(np.nanpercentile(d0, 10))
+        converge_m = converge_distance(d0, subject_mask)
 
         f = scene.f_px
         shift = f * BASELINE_M / (2 * converge_m)
@@ -457,13 +440,7 @@ class SharpTaichiMethod(_SharpBase):
             intermediates["splat_rgb"] = (
                 linear_to_srgb(center_rgb) * 255
             ).astype(np.uint8)
-            valid = np.isfinite(d0) & (d0 > 0)
-            inv_d = np.zeros_like(d0)
-            inv_d[valid] = 1.0 / d0[valid]
-            lo, hi = float(inv_d[valid].min()), float(inv_d[valid].max())
-            depth_01 = (inv_d - lo) / max(hi - lo, 1e-6)
-            depth_01[~valid] = 0.0
-            intermediates["depth01"] = depth_01.astype(np.float32)
+            intermediates["depth01"] = depth_to_01(d0)
 
         logger.info(
             "SHARP taichi: converge=%.2fm, backend=%s",

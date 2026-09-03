@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from pystereo_core.stereo.notes import converge_distance, disparity_px
+from pystereo_core.stereo.notes import converge_distance, depth_to_01, disparity_px
 
 logger = logging.getLogger(__name__)
 
@@ -74,19 +74,6 @@ def is_full_taichi_available() -> bool:
 def _linear_to_srgb(x: np.ndarray) -> np.ndarray:
     x = np.clip(x, 0, 1)
     return np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(x, 1 / 2.4) - 0.055)
-
-
-def _depth_to_01(depth: np.ndarray) -> np.ndarray:
-    """Normalise a metric depth buffer to [0, 1] via inverse depth."""
-    valid = np.isfinite(depth) & (depth > 0)
-    if not valid.any():
-        return np.zeros_like(depth, dtype=np.float32)
-    inv = np.zeros_like(depth)
-    inv[valid] = 1.0 / depth[valid]
-    far = float(inv[valid].min())
-    inv[~valid] = far
-    lo, hi = far, float(inv[valid].max())
-    return ((inv - lo) / max(hi - lo, 1e-6)).astype(np.float32)
 
 
 class TaichiScene:
@@ -202,7 +189,7 @@ def render_stereo_taichi(
             )
         return img
 
-    depth01 = _depth_to_01(l_d)
+    depth01 = depth_to_01(l_d)
     zn = float(np.nanpercentile(l_d, 1))
     zf = float(np.nanpercentile(l_d, 99))
     return {

@@ -28,6 +28,24 @@ def disparity_px(f_px: float, baseline_m: float, z_m: float, converge_m: float) 
     return round(f_px * baseline_m * (1 / z_m - 1 / converge_m), 1)
 
 
+def depth_to_01(depth: np.ndarray) -> np.ndarray:
+    """Normalise a metric depth buffer to [0, 1] via inverse depth.
+
+    NaN (holes) and zero or negative depth (invalid) map to the farthest
+    valid distance, and a buffer with nothing valid at all comes back as
+    zeros - taking min/max over the empty selection would raise instead.
+    """
+    valid = np.isfinite(depth) & (depth > 0)
+    if not valid.any():
+        return np.zeros_like(depth, dtype=np.float32)
+    inv = np.zeros_like(depth)
+    inv[valid] = 1.0 / depth[valid]
+    far = float(inv[valid].min())
+    inv[~valid] = far
+    lo, hi = far, float(inv[valid].max())
+    return ((inv - lo) / max(hi - lo, 1e-6)).astype(np.float32)
+
+
 def converge_distance(
     depth: np.ndarray,
     subject_mask: np.ndarray | None = None,
