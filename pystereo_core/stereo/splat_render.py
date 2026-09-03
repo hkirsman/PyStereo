@@ -15,6 +15,8 @@ import cv2
 import numpy as np
 import torch
 
+from pystereo_core.stereo.notes import disparity_px
+
 R_MAX = 7
 HARD_T = 0.35
 SOFT_T = 0.04
@@ -450,8 +452,8 @@ def render_stereo(
                 "f_px": round(f, 1),
                 "baseline_m": baseline_m,
                 "converge_m": round(converge_m, 2),
-                "disp_px_near": round(f * baseline_m * (1 / zn - 1 / converge_m), 1),
-                "disp_px_far": round(f * baseline_m * (1 / zf - 1 / converge_m), 1),
+                "disp_px_near": disparity_px(f, baseline_m, zn, converge_m),
+                "disp_px_far": disparity_px(f, baseline_m, zf, converge_m),
                 "splat_filled_pct_left": round(float((l_h > 0).mean() * 100), 2),
                 "splat_filled_pct_right": round(float((r_h > 0).mean() * 100), 2),
             },
@@ -470,8 +472,8 @@ def render_stereo(
             "f_px": round(f, 1),
             "baseline_m": baseline_m,
             "converge_m": round(converge_m, 2),
-            "disp_px_near": round(f * baseline_m * (1 / zn - 1 / converge_m), 1),
-            "disp_px_far": round(f * baseline_m * (1 / zf - 1 / converge_m), 1),
+            "disp_px_near": disparity_px(f, baseline_m, zn, converge_m),
+            "disp_px_far": disparity_px(f, baseline_m, zf, converge_m),
             "hole_pct_left": round(float((l_h > 0).mean() * 100), 3),
             "hole_pct_right": round(float((r_h > 0).mean() * 100), 3),
         },

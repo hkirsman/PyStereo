@@ -25,6 +25,8 @@ from typing import Any
 
 import numpy as np
 
+from pystereo_core.stereo.notes import disparity_px
+
 logger = logging.getLogger(__name__)
 
 # Mirrors splat_render.py - keep in sync.
@@ -204,8 +206,8 @@ def render_stereo_taichi(
             "f_px": round(f, 1),
             "baseline_m": baseline_m,
             "converge_m": round(converge_m, 2),
-            "disp_px_near": round(f * baseline_m * (1 / zn - 1 / converge_m), 1),
-            "disp_px_far": round(f * baseline_m * (1 / zf - 1 / converge_m), 1),
+            "disp_px_near": disparity_px(f, baseline_m, zn, converge_m),
+            "disp_px_far": disparity_px(f, baseline_m, zf, converge_m),
             "hole_pct_left": round(float((l_h > 0).mean() * 100), 3),
             "hole_pct_right": round(float((r_h > 0).mean() * 100), 3),
         },
