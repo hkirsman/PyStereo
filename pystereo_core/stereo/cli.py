@@ -138,6 +138,15 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
+    if args.method and args.depth is not None:
+        if not available_methods()[args.method].needs_depth:
+            logger.error(
+                "--method %s predicts its own geometry and never reads a depth "
+                "map; drop --depth, or pick a depth-map method",
+                args.method,
+            )
+            return 1
+
     input_path: Path = args.input.expanduser().resolve()
     if not input_path.is_file():
         logger.error("Input not found: %s", input_path)
