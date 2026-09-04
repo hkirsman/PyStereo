@@ -1,4 +1,4 @@
-"""Method: Per-Eye Inpaint (Full-Res) — sharp warped pixels with downscaled inpaint fills.
+"""Method: Per-Eye Inpaint (Full-Res) - sharp warped pixels with downscaled inpaint fills.
 
 Full-resolution variant of :class:`~pystereo_core.stereo.methods.per_eye_inpaint.PerEyeInpaintMethod`.
 Warps at full source resolution (cheap numpy/cv2 math), then only
@@ -77,11 +77,16 @@ def _upscale_to(img: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
 class FullResWarpMethod(BaseStereoMethod):
     name: ClassVar[str] = "fullres_warp"
     label: ClassVar[str] = "Per-Eye Inpaint (Full-Res)"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Same warp strategy as Per-Eye Inpaint but at full source "
         "resolution. Downscales only for inpainting, then composites "
         "fills back via a feathered occlusion mask. Preserves maximum "
         "sharpness for the ~97% of pixels that are directly warped."
+    )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Like Per-Eye Inpaint but warps at full resolution "
+        "for maximum sharpness on directly visible pixels. Slower."
     )
 
     wants_full_res: ClassVar[bool] = True

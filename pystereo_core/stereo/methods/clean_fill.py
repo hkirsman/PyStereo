@@ -1,4 +1,4 @@
-"""Method 5: Clean Fill — AOT-GAN per-eye inpainting (no LaMa workarounds).
+"""Method 5: Clean Fill - AOT-GAN per-eye inpainting (no LaMa workarounds).
 
 Uses AOT-GAN (Apache 2.0) instead of LaMa for inpainting.  AOT-GAN uses
 dilated convolutions (not FFCs) and sees the original image in masked
@@ -6,7 +6,7 @@ regions (not zero-filled), eliminating the two core LaMa issues:
 
 - **No dark bias:** input is ``[image, mask]``, not ``image * (1 - mask)``
 - **No global texture cloning:** dilated convolutions have a large but
-  local receptive field — they can't reach distant textures
+  local receptive field - they can't reach distant textures
 
 Because the model doesn't need workarounds, the pipeline is simpler:
 hybrid warp → unilateral dilation → AOT-GAN inpaint per eye → Poisson
@@ -32,13 +32,18 @@ logger = logging.getLogger(__name__)
 
 class CleanFillMethod(BaseStereoMethod):
     name: ClassVar[str] = "clean_fill"
-    label: ClassVar[str] = "Clean Fill / AOT-GAN (Deprecated)"
+    label: ClassVar[str] = "Clean Fill / AOT-GAN"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Hybrid z-buffer warp with per-eye AOT-GAN inpainting.  "
         "AOT-GAN uses dilated convolutions (no FFC dark bias, no "
         "global texture cloning) so no width routing, banding, or "
         "bg-plate workarounds are needed.  Unilateral mask dilation "
         "toward foreground only + Poisson seam blending."
+    )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Per-eye AOT-GAN fill without LaMa dark-bias "
+        "workarounds. Experimental alternate inpainter."
     )
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {

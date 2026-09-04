@@ -4,7 +4,8 @@
 flask
 
 # Core ML runtime
-torch
+# torch 2.0+: torch.mps.empty_cache, torch.load(weights_only=True)
+torch>=2.0
 torchvision
 numpy
 opencv-contrib-python
@@ -23,6 +24,17 @@ simple-lama-inpainting
 
 # HuggingFace Hub (via transformers, but pin for download manager)
 huggingface_hub
+
+# SHARP splat stereo (Apple ML Research license, research-only)
+# ml-sharp is a git submodule: pip install -e ./ml-sharp --no-deps
+# (--no-deps skips its CUDA-only gsplat; its other deps are listed here)
+scipy
+pillow-heif
+plyfile
+
+# Optional: GPU splat rasteriser for sharp_taichi / sharp_alpha_taichi
+# (wheels for Python 3.9-3.13; torch fallback is used without it)
+# taichi
 
 # Optional: Qt desktop GUI
 # PySide6-Essentials

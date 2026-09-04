@@ -10,6 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 from pystereo_core.stereo.config import InpaintBackendName, StereoSettings
+from pystereo_core.stereo.methods import available_methods
 from pystereo_core.stereo.pipeline import StereoPipeline
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Longest side for warp/inpaint processing (default: 2048)",
     )
     parser.add_argument(
+        "--method",
+        type=str,
+        default=None,
+        choices=sorted(available_methods()),
+        help="Stereo method (default: per_eye_inpaint)",
+    )
+    parser.add_argument(
         "--no-heal",
         action="store_true",
         default=False,
@@ -91,6 +99,17 @@ def _run_synthesis(
     rgb: Image.Image,
     args: argparse.Namespace,
 ) -> Image.Image:
+    method = getattr(args, "method", None)
+
+    if method:
+        # Through the pipeline, so a method running a nested pass (sharp_depth)
+        # reuses the models this pipeline already holds. argparse validated the
+        # name, so a failure here is a real error - wrapping it in RuntimeError
+        # sent it down main()'s LaMa retry path.
+        stereo_method = pipeline._get_method(method)
+        if not stereo_method.needs_depth:
+            return pipeline._synthesize_no_depth(rgb, stereo_method, method)
+
     if args.depth is not None:
         depth_path = args.depth.expanduser().resolve()
         if not depth_path.is_file():
@@ -98,16 +117,16 @@ def _run_synthesis(
         with Image.open(depth_path) as dimg:
             depth = dimg.convert("L")
         logger.info("Using depth map %s", depth_path)
-        return pipeline.synthesize(rgb, depth)
+        return pipeline.synthesize(rgb, depth, method=method)
 
     from pystereo_core.depth import DepthEstimator
 
     device = _resolve_device(args.device)
     estimator = DepthEstimator()
-    logger.info("Loading depth model on %s…", device)
+    logger.info("Loading depth model on %s...", device)
     estimator.load(device)
     try:
-        return pipeline.synthesize_with_depth_estimator(rgb, estimator)
+        return pipeline.synthesize_with_depth_estimator(rgb, estimator, method=method)
     finally:
         estimator.unload()
 
@@ -118,6 +137,15 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
+
+    if args.method and args.depth is not None:
+        if not available_methods()[args.method].needs_depth:
+            logger.error(
+                "--method %s predicts its own geometry and never reads a depth "
+                "map; drop --depth, or pick a depth-map method",
+                args.method,
+            )
+            return 1
 
     input_path: Path = args.input.expanduser().resolve()
     if not input_path.is_file():

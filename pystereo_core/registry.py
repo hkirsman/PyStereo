@@ -5,7 +5,7 @@ The registry lazily loads models on first use and caches them in memory.
 GPU capability is auto-detected at startup; callers can query readiness
 before invoking a model.
 
-Hub weight downloads are owned by :mod:`pystereo_core.download` — ``get()`` only loads
+Hub weight downloads are owned by :mod:`pystereo_core.download` - ``get()`` only loads
 from the local cache and returns ``None`` while downloads are in progress.
 """
 
@@ -274,10 +274,14 @@ class ModelRegistry:
 # ---------------------------------------------------------------------------
 
 _registry: Optional[ModelRegistry] = None
+_registry_lock = threading.Lock()
+
 
 def get_registry() -> ModelRegistry:
     """Return (or create) the global model registry."""
     global _registry
     if _registry is None:
-        _registry = ModelRegistry()
+        with _registry_lock:
+            if _registry is None:
+                _registry = ModelRegistry()
     return _registry

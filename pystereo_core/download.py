@@ -2,7 +2,7 @@
 
 Downloads HuggingFace / URL artifacts when the user enables AI stereo,
 exposing thread-safe progress for the dashboard and Quest clients.
-Inference paths must never trigger Hub downloads — only this manager does.
+Inference paths must never trigger Hub downloads - only this manager does.
 """
 
 from __future__ import annotations
@@ -26,6 +26,10 @@ LAMA_MODEL_URL = (
     "https://github.com/enesmsahin/simple-lama-inpainting/releases/"
     "download/v0.1.0/big-lama.pt"
 )
+SHARP_MODEL_URL = (
+    "https://ml-site.cdn-apple.com/models/sharp/sharp_2572gikvuh.pt"
+)
+SHARP_CKPT_FILENAME = "sharp_2572gikvuh.pt"
 
 # Last-resort size when neither local cache nor remote metadata is available.
 _FALLBACK_BYTES: Dict[str, int] = {
@@ -35,6 +39,7 @@ _FALLBACK_BYTES: Dict[str, int] = {
     "segment": 424 * 1024 * 1024,
     "inpaint": 196 * 1024 * 1024,
     "aotgan": 58 * 1024 * 1024,
+    "sharp": 2800 * 1024 * 1024,
 }
 
 DEPTH_MODEL_SPECS: Dict[str, "ArtifactSpec"] = {}  # populated after ArtifactSpec
@@ -84,6 +89,13 @@ DEPTH_MODEL_SPECS.update({
     "large": ArtifactSpec(id="depth_large", name="Depth Anything V2 Large", kind="hf", repo_id=DEPTH_LARGE_REPO_ID),
 })
 
+SHARP_SPEC = ArtifactSpec(
+    id="sharp",
+    name="Apple SHARP (research-only)",
+    kind="url",
+    url=SHARP_MODEL_URL,
+)
+
 
 def _lama_cache_path(url: str) -> Path:
     """Mirror ``simple_lama_inpainting`` cache layout under torch hub checkpoints."""
@@ -109,9 +121,10 @@ def _artifact_is_local(spec: ArtifactSpec) -> bool:
     if spec.kind == "hf" and spec.repo_id:
         return _hf_repo_is_local(spec.repo_id)
     if spec.kind == "url" and spec.url:
-        env_path = os.environ.get("LAMA_MODEL")
-        if env_path and Path(env_path).is_file():
-            return True
+        if spec.id == "inpaint":
+            env_path = os.environ.get("LAMA_MODEL")
+            if env_path and Path(env_path).is_file():
+                return True
         return _lama_cache_path(spec.url).is_file()
     return False
 
@@ -133,9 +146,10 @@ def _dir_size_bytes(root: Path) -> int:
 def _measure_local_bytes(spec: ArtifactSpec) -> int:
     """Exact on-disk size for a cached artifact (0 if not present)."""
     if spec.kind == "url" and spec.url:
-        env_path = os.environ.get("LAMA_MODEL")
-        if env_path and Path(env_path).is_file():
-            return Path(env_path).stat().st_size
+        if spec.id == "inpaint":
+            env_path = os.environ.get("LAMA_MODEL")
+            if env_path and Path(env_path).is_file():
+                return Path(env_path).stat().st_size
         path = _lama_cache_path(spec.url)
         return path.stat().st_size if path.is_file() else 0
     if spec.kind == "hf" and spec.repo_id:
@@ -239,8 +253,11 @@ def _hf_repo_cache_dir(repo_id: str) -> Path | None:
     return None
 
 
-def _safe_lama_cache_file(url: str) -> Path | None:
-    """Return the default LaMa checkpoint path only if it matches the allowlist."""
+_ALLOWED_URL_CHECKPOINTS = {"big-lama.pt", SHARP_CKPT_FILENAME}
+
+
+def _safe_url_cache_file(url: str) -> Path | None:
+    """Return the torch-hub checkpoint path for *url* if its filename is allowlisted."""
     if not url:
         return None
     from urllib.parse import urlparse
@@ -248,14 +265,13 @@ def _safe_lama_cache_file(url: str) -> Path | None:
     from torch.hub import get_dir
 
     filename = os.path.basename(urlparse(url).path)
-    # Only ever delete the known release artifact name — never an empty/odd basename.
-    if filename != "big-lama.pt":
-        logger.warning("Refusing LaMa delete: unexpected filename %r", filename)
+    if filename not in _ALLOWED_URL_CHECKPOINTS:
+        logger.warning("Refusing delete: unexpected checkpoint filename %r", filename)
         return None
     checkpoints = (Path(get_dir()).expanduser().resolve() / "checkpoints")
     path = (checkpoints / filename).resolve()
     if path.parent != checkpoints or path.name != filename:
-        logger.warning("Refusing LaMa delete: path escaped checkpoints dir (%s)", path)
+        logger.warning("Refusing delete: path escaped checkpoints dir (%s)", path)
         return None
     return path
 
@@ -266,11 +282,30 @@ def _artifact_deletable_path(spec: ArtifactSpec) -> Path | None:
         root = _hf_repo_cache_dir(spec.repo_id)
         return root if root is not None and root.is_dir() else None
     if spec.kind == "url" and spec.url:
-        if os.environ.get("LAMA_MODEL"):
+        if spec.id != "sharp" and os.environ.get("LAMA_MODEL"):
             return None
-        path = _safe_lama_cache_file(spec.url)
+        path = _safe_url_cache_file(spec.url)
         return path if path is not None and path.is_file() else None
     return None
+
+
+def _delete_url_partial(spec: ArtifactSpec) -> int:
+    """Remove a ``.partial`` download file for a URL artifact, if present."""
+    if spec.kind != "url" or not spec.url:
+        return 0
+    path = _safe_url_cache_file(spec.url)
+    if path is None:
+        return 0
+    partial = path.with_suffix(path.suffix + ".partial")
+    try:
+        if partial.is_file() and partial.parent == path.parent:
+            size = partial.stat().st_size
+            partial.unlink()
+            logger.info("Deleted partial %s (%s bytes)", partial, size)
+            return size
+    except OSError as exc:
+        logger.warning("Failed to delete partial %s: %s", partial, exc)
+    return 0
 
 
 def _delete_artifact(spec: ArtifactSpec) -> tuple[int, str | None]:
@@ -332,7 +367,7 @@ def _make_progress_tqdm(
     import threading as _threading
 
     class _ProgressTqdm:
-        # tqdm.contrib.concurrent.ensure_lock may ``del cls._lock`` — use getattr.
+        # tqdm.contrib.concurrent.ensure_lock may ``del cls._lock`` - use getattr.
         _lock: Optional[_threading.RLock] = None
 
         @classmethod
@@ -423,6 +458,10 @@ def _make_progress_tqdm(
     return _ProgressTqdm
 
 
+class _DownloadCancelled(Exception):
+    """Raised inside a download thread when the user cancels."""
+
+
 @dataclass
 class _ArtifactRuntime:
     # absent | queued | downloading | ready | error
@@ -450,6 +489,9 @@ class ModelDownloadManager:
     _job_bytes_done: int = field(default=0, init=False)
     _job_bytes_total: int = field(default=0, init=False)
     _file_reported: int = field(default=0, init=False)
+    _cancel_requested: bool = field(default=False, init=False)
+    # SHARP was requested while the worker was busy; start it when free.
+    _sharp_queued: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         for spec in STEREO_PACK:
@@ -518,7 +560,7 @@ class ModelDownloadManager:
         """Remove cached stereo-pack weights from disk and reset pack state.
 
         Refuses while a download is in progress. Does not change the
-        ``enable_ai_stereo`` config flag — callers disable that separately.
+        ``enable_ai_stereo`` config flag - callers disable that separately.
         """
         with self._lock:
             if self._pack_state == "downloading":
@@ -606,9 +648,136 @@ class ModelDownloadManager:
             self._thread.start()
         return True
 
+    def is_sharp_model_local(self) -> bool:
+        """Check if the SHARP checkpoint is cached locally."""
+        return _artifact_is_local(SHARP_SPEC)
+
+    def ensure_sharp_model_async(self) -> bool:
+        """Start downloading the SHARP checkpoint in the background.
+
+        If the worker thread is busy with another job (base pack or a depth
+        model), the request is queued and starts as soon as that job ends.
+        Returns True if a download was started, queued, or already local.
+        """
+        if _artifact_is_local(SHARP_SPEC):
+            return True
+        with self._lock:
+            art_id = SHARP_SPEC.id
+            if art_id not in self._artifacts:
+                self._artifacts[art_id] = _ArtifactRuntime()
+            art = self._artifacts[art_id]
+            if self._thread is not None and self._thread.is_alive():
+                if art.state == "downloading":
+                    return True
+                self._sharp_queued = True
+                art.state = "queued"
+                art.percent = 0
+                art.error = None
+                art.bytes_total = _FALLBACK_BYTES.get(art_id, 0)
+                art.bytes_downloaded = 0
+                return True
+            self._sharp_queued = False
+            self._start_sharp_download_locked()
+        return True
+
+    def _start_sharp_download_locked(self) -> None:
+        """Spawn the SHARP download thread. Caller must hold ``_lock``."""
+        art_id = SHARP_SPEC.id
+        if art_id not in self._artifacts:
+            self._artifacts[art_id] = _ArtifactRuntime()
+        self._cancel_requested = False
+        self._error = None
+        self._message = f"Downloading {SHARP_SPEC.name}..."
+        self._file_reported = 0
+        art = self._artifacts[art_id]
+        art.state = "downloading"
+        art.percent = 0
+        art.error = None
+        art.bytes_total = _FALLBACK_BYTES.get(art_id, 0)
+        art.bytes_downloaded = 0
+        self._thread = threading.Thread(
+            target=self._run_single_download,
+            args=(SHARP_SPEC,),
+            name="pystereo-dl-sharp",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _start_queued_sharp(self) -> None:
+        """Run a SHARP download that was queued behind the finishing job."""
+        with self._lock:
+            if not self._sharp_queued:
+                return
+            self._sharp_queued = False
+            art = self._artifacts.get(SHARP_SPEC.id)
+            if art is None or art.state != "queued":
+                return
+            if _artifact_is_local(SHARP_SPEC):
+                art.state = "ready"
+                art.percent = 100
+                return
+            self._start_sharp_download_locked()
+
+    def cancel_sharp_download(self) -> dict[str, Any]:
+        """Request cancellation of an in-progress SHARP download.
+
+        The download thread stops at the next chunk boundary, drops the
+        ``.partial`` file, and resets artifact state to absent.
+        """
+        with self._lock:
+            art = self._artifacts.get(SHARP_SPEC.id)
+            if self._sharp_queued or (art is not None and art.state == "queued"):
+                # Not running yet - just drop the request. Do not set
+                # _cancel_requested: that would abort the job the worker is
+                # actually busy with.
+                self._sharp_queued = False
+                if art is not None:
+                    art.state = "absent"
+                    art.percent = 0
+                    art.bytes_downloaded = 0
+                    art.error = None
+                return {"cancelled": True}
+            # _cancel_requested is shared by the one worker thread, so only
+            # raise it when SHARP is what that worker is on. Raising it while
+            # the pack or a depth model downloads would cancel that instead.
+            alive = self._thread is not None and self._thread.is_alive()
+            downloading = art is not None and art.state == "downloading"
+            if not (alive and downloading):
+                return {"cancelled": False, "reason": "not_downloading"}
+            self._cancel_requested = True
+            self._message = "Cancelling SHARP download..."
+            if art is not None:
+                art.state = "absent"
+                art.percent = 0
+                art.bytes_downloaded = 0
+                art.error = None
+        return {"cancelled": True}
+
+    def delete_sharp_model(self) -> dict[str, Any]:
+        """Remove the SHARP checkpoint (and any partial) from disk."""
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                raise RuntimeError("Cannot delete while a download is in progress")
+            art = self._artifacts.get(SHARP_SPEC.id)
+            if art is not None and art.state in ("queued", "downloading"):
+                raise RuntimeError("Cannot delete while a download is in progress")
+        bytes_removed, path = _delete_artifact(SHARP_SPEC)
+        bytes_removed += _delete_url_partial(SHARP_SPEC)
+        with self._lock:
+            art = self._artifacts.get(SHARP_SPEC.id)
+            if art:
+                art.state = "absent"
+                art.percent = 0
+                art.bytes_downloaded = 0
+                art.error = None
+        return {"deleted_bytes": bytes_removed, "path": path}
+
     def _run_single_download(self, spec: ArtifactSpec) -> None:
-        """Download a single artifact (used for optional depth models)."""
+        """Download a single artifact (used for optional models)."""
         try:
+            with self._lock:
+                if self._cancel_requested:
+                    raise _DownloadCancelled()
             if _artifact_is_local(spec):
                 with self._lock:
                     art = self._artifacts.get(spec.id)
@@ -617,7 +786,9 @@ class ModelDownloadManager:
                         art.percent = 100
             else:
                 with self._lock:
-                    self._message = f"Downloading {spec.name}…"
+                    if self._cancel_requested:
+                        raise _DownloadCancelled()
+                    self._message = f"Downloading {spec.name}..."
                     art = self._artifacts.get(spec.id)
                     if art:
                         art.state = "downloading"
@@ -625,6 +796,11 @@ class ModelDownloadManager:
                     self._file_reported = 0
                 if spec.kind == "hf" and spec.repo_id:
                     self._download_hf(spec)
+                elif spec.kind == "url" and spec.url:
+                    self._download_url(spec)
+                with self._lock:
+                    if self._cancel_requested:
+                        raise _DownloadCancelled()
                 measured = _measure_local_bytes(spec)
                 with self._lock:
                     if measured > 0:
@@ -638,11 +814,30 @@ class ModelDownloadManager:
             with self._lock:
                 self._message = f"{spec.name} ready"
                 self._error = None
+                self._cancel_requested = False
             self.refresh_local_state()
             logger.info("Downloaded %s", spec.name)
+        except _DownloadCancelled:
+            logger.info("Download of %s cancelled", spec.name)
+            if spec.kind == "url":
+                _delete_url_partial(spec)
+            with self._lock:
+                self._cancel_requested = False
+                self._error = None
+                self._message = f"{spec.name} download cancelled"
+                art = self._artifacts.get(spec.id)
+                # A re-request can land while this thread is winding down.
+                # Leave its "queued" state alone; the finally starts it.
+                if art and art.state != "queued":
+                    art.state = "absent"
+                    art.percent = 0
+                    art.bytes_downloaded = 0
+                    art.error = None
+            self.refresh_local_state()
         except Exception as exc:
             logger.exception("Download of %s failed", spec.name)
             with self._lock:
+                self._cancel_requested = False
                 self._error = str(exc)
                 self._message = f"Download failed: {exc}"
                 art = self._artifacts.get(spec.id)
@@ -650,6 +845,10 @@ class ModelDownloadManager:
                     art.state = "error"
                     art.error = str(exc)
             self.refresh_local_state()
+        finally:
+            # Also when this job was SHARP: cancelling it and asking again
+            # queues a second SHARP run, and nothing else would start it.
+            self._start_queued_sharp()
 
     def ensure_stereo_pack_async(self) -> None:
         """Start a background download if the pack is not already ready."""
@@ -671,7 +870,7 @@ class ModelDownloadManager:
                 if art.state == "ready":
                     self._job_bytes_done += art.bytes_total or self._exact_bytes(spec)
                     continue
-                # Waiting in line — not actively downloading yet.
+                # Waiting in line - not actively downloading yet.
                 art.state = "queued"
                 art.percent = 0
                 art.error = None
@@ -904,6 +1103,8 @@ class ModelDownloadManager:
                     if art.state == "downloading":
                         art.state = "error"
                         art.error = str(exc)
+        finally:
+            self._start_queued_sharp()
 
     def _download_hf(self, spec: ArtifactSpec) -> None:
         from huggingface_hub import snapshot_download
@@ -939,6 +1140,9 @@ class ModelDownloadManager:
             downloaded = 0
             with open(tmp, "wb") as out:
                 while True:
+                    with self._lock:
+                        if self._cancel_requested:
+                            raise _DownloadCancelled()
                     chunk = resp.read(1024 * 256)
                     if not chunk:
                         break
@@ -947,6 +1151,9 @@ class ModelDownloadManager:
                     self._on_file_progress(
                         spec.id, float(downloaded), float(total), spec.name
                     )
+        with self._lock:
+            if self._cancel_requested:
+                raise _DownloadCancelled()
         tmp.replace(dest)
         self._on_file_done(spec.id, float(total))
 

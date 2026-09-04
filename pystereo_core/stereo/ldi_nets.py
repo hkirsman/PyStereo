@@ -3,7 +3,7 @@
 Ported from "3D Photography using Context-aware Layered Depth Inpainting"
 (Shih et al., CVPR 2020).  Three specialised networks:
 
-- **Edge network** (GAN encoder–decoder with spectral norm):
+- **Edge network** (GAN encoder-decoder with spectral norm):
   Hallucinate depth-edge continuations in masked regions.
 - **Depth network** (U-Net with partial convolutions):
   Inpaint depth guided by hallucinated edges.
@@ -156,7 +156,7 @@ class _ResnetBlock(nn.Module):
         return x + self.conv_block(x)
 
 
-# ── Edge Inpainting Network (GAN encoder–decoder) ────────────────────
+# ── Edge Inpainting Network (GAN encoder-decoder) ────────────────────
 
 
 class InpaintEdgeNet(nn.Module):

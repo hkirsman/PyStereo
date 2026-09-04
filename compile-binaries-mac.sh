@@ -23,9 +23,25 @@ fi
 echo "Installing project dependencies into .venv..."
 "$ROOT/$PYTHON" -m pip install -U pip
 "$ROOT/$PYTHON" -m pip install -r requirements.txt
+"$ROOT/$PYTHON" -m pip install -q "PySide6-Essentials>=6.7.0"
+
+echo "Initializing ml-sharp submodule (required for SHARP stereo methods)..."
+git submodule update --init ml-sharp
+if [[ ! -d "$ROOT/ml-sharp/src/sharp" ]]; then
+  echo "ERROR: ml-sharp submodule is missing at $ROOT/ml-sharp/src/sharp" >&2
+  echo "Run: git submodule update --init ml-sharp" >&2
+  exit 1
+fi
+"$ROOT/$PYTHON" -m pip install -e ./ml-sharp --no-deps
+
+echo "Installing optional Taichi (SHARP Taichi methods, faster GPU render)..."
+"$ROOT/$PYTHON" -m pip install -q taichi 2>/dev/null || echo "  (taichi not installed - SHARP Taichi will use torch fallback)"
 
 echo "Installing PyInstaller into .venv (if needed)..."
 "$ROOT/$PYTHON" -m pip install -q -U pyinstaller
+
+echo "Generating application icons..."
+"$ROOT/$PYTHON" packaging/brand_icon.py
 
 echo "Building PyStereo (batch GUI + CLI)..."
 rm -rf dist/PyStereo dist/PyStereo.app

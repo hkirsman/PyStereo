@@ -418,6 +418,26 @@ class PyStereoQtWindow(QMainWindow):
         )
         t.start()
 
+    @staticmethod
+    def _batch_models(settings: Any) -> tuple[Any, Any]:
+        """Pipeline for a batch run, and the lock to hold while it runs.
+
+        With the service started, ``app`` is imported and already holds a
+        pipeline with BiRefNet and LaMa resident - share it instead of
+        loading a second copy of both, and take the same lock its request
+        handlers use so the two never drive those models at once. Without
+        the service there is nothing to share, and nothing to serialise
+        against, so build our own.
+        """
+        from pystereo_core.stereo.pipeline import StereoPipeline
+
+        # Look the module up rather than import it: importing app.py starts
+        # web logging, which a GUI-only session should not get.
+        app_mod = sys.modules.get("app")
+        if app_mod is None:
+            return StereoPipeline(settings=settings), threading.Lock()
+        return app_mod.get_pipeline().with_settings(settings), app_mod.PREDICT_LOCK
+
     def _batch_worker(
         self,
         images: list[Path],
@@ -432,7 +452,6 @@ class PyStereoQtWindow(QMainWindow):
         from pystereo_core.depth import DepthEstimator
         from pystereo_core.registry import get_registry
         from pystereo_core.stereo.config import StereoSettings
-        from pystereo_core.stereo.pipeline import StereoPipeline
 
         registry = get_registry()
         registry.detect_gpu()
@@ -446,7 +465,7 @@ class PyStereoQtWindow(QMainWindow):
             settings,
             max_processing_dim=max_dim,
         )
-        pipeline = StereoPipeline(settings=settings)
+        pipeline, predict_lock = self._batch_models(settings)
 
         depth_model = registry.get("depth")
         if depth_model is None:
@@ -460,13 +479,14 @@ class PyStereoQtWindow(QMainWindow):
             try:
                 t0 = time.perf_counter()
                 rgb = Image.open(img_path).convert("RGB")
-                if hasattr(depth_model, "process_raw"):
-                    depth_f32 = depth_model.process_raw(rgb)
-                else:
-                    depth_pil = depth_model.process(rgb)
-                    depth_f32 = np.array(depth_pil.convert("L"), dtype=np.float32) / 255.0
+                with predict_lock:
+                    if hasattr(depth_model, "process_raw"):
+                        depth_f32 = depth_model.process_raw(rgb)
+                    else:
+                        depth_pil = depth_model.process(rgb)
+                        depth_f32 = np.array(depth_pil.convert("L"), dtype=np.float32) / 255.0
 
-                sbs_img = pipeline.synthesize(rgb, depth_f32, method=method)
+                    sbs_img = pipeline.synthesize(rgb, depth_f32, method=method)
 
                 if output_dir:
                     out_path = output_dir / f"{img_path.stem}_sbs.jpg"
@@ -515,9 +535,11 @@ class PyStereoQtWindow(QMainWindow):
         self._log_line("Starting server on http://127.0.0.1:8766 ...")
 
         def _run_server() -> None:
-            from app import app, set_gui_log_sink
+            from app import app, force_service_enabled, set_gui_log_sink
 
             set_gui_log_sink(lambda msg: self._bridge.server_log.emit(msg))
+            # The user pressed "Start server": that is the opt-in.
+            force_service_enabled(True)
 
             import logging as _logging
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass, fields, replace
 from typing import Any, Literal
 
 InpaintBackendName = Literal["lama", "opencv", "none", "flux", "aotgan"]
-StereoMethodName = Literal["per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill"]
+StereoMethodName = Literal["per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill", "sharp_splat", "sharp_splat_full", "sharp_detail", "sharp_hires", "sharp_alpha", "sharp_alpha_full", "sharp_alpha_taichi", "sharp_depth", "sharp_mesh", "sharp_taichi"]
 DepthModelSize = Literal["small", "base", "large"]
 
 DEFAULT_METHOD: StereoMethodName = "per_eye_inpaint"
@@ -19,7 +19,7 @@ class StereoSettings:
     """Tunable stereo synthesis parameters.
 
     Defaults here are a neutral baseline.  Each stereo method declares
-    ``SETTING_OVERRIDES`` which are applied on top — see
+    ``SETTING_OVERRIDES`` which are applied on top - see
     :func:`from_env` and :meth:`with_method_defaults`.
     """
 
@@ -42,6 +42,11 @@ class StereoSettings:
     segmenter_padding: int = 200
     narrow_strip_max_px: int = 12
     bg_plate_tight_dilate_px: int = 10
+    #: Read SHARP predictions back from ``.sharp_cache``. ``False`` re-runs
+    #: the network every time (benchmarking); the resident predictor and the
+    #: model weights are unaffected.
+    sharp_disk_cache: bool = True
+
     def with_method_defaults(self) -> StereoSettings:
         """Return a copy with method-specific overrides applied.
 
@@ -69,9 +74,13 @@ class StereoSettings:
         Apply primary env vars, then method ``SETTING_OVERRIDES``, then
         optional tuning env overrides.
         """
+        from pystereo_core.stereo.methods import available_methods
+
         method_raw = method or os.environ.get("PYSTEREO_METHOD", "").strip().lower()
         stereo_method: StereoMethodName = DEFAULT_METHOD
-        if method_raw in ("per_eye_inpaint", "fullres_warp", "bg_plate_fill", "routed_fill", "direct_fill", "clean_fill", "combo_fill", "ldi_inpaint", "iterative_fill"):
+        # The registry, not the Literal above, decides what is selectable so
+        # a new method file cannot be missed here.
+        if method_raw and method_raw in available_methods():
             stereo_method = method_raw  # type: ignore[assignment]
 
         backend_raw = os.environ.get("PYSTEREO_INPAINT", "lama").strip().lower()
@@ -97,6 +106,9 @@ class StereoSettings:
         heal_raw = os.environ.get("PYSTEREO_HEAL", "1").strip().lower()
         depth_healing = heal_raw not in ("0", "false", "no", "off")
 
+        cache_raw = os.environ.get("PYSTEREO_SHARP_CACHE", "1").strip().lower()
+        sharp_disk_cache = cache_raw not in ("0", "false", "no", "off")
+
         # Build with neutral defaults, then apply method-specific overrides,
         # then apply any explicit env-var overrides on top.
         base = cls(
@@ -105,6 +117,7 @@ class StereoSettings:
             inpaint_backend=backend,
             max_processing_dim=max_processing_dim,
             depth_healing=depth_healing,
+            sharp_disk_cache=sharp_disk_cache,
         )
         base = base.with_method_defaults()
 

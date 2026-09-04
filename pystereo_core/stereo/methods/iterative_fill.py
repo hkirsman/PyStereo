@@ -46,7 +46,7 @@ def _iterative_patch_fill(
 ) -> None:
     """In-place iterative local-patch inpainting, back-to-front by depth.
 
-    Modifies *eye_img* directly — each filled region becomes visible
+    Modifies *eye_img* directly - each filled region becomes visible
     context for subsequent patches.
     """
     h, w = occ_mask.shape[:2]
@@ -137,12 +137,17 @@ def _iterative_patch_fill(
 
 class IterativeFillMethod(BaseStereoMethod):
     name: ClassVar[str] = "iterative_fill"
-    label: ClassVar[str] = "Iterative Local Patch (Deprecated)"
+    label: ClassVar[str] = "Iterative Local Patch"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Per-eye disocclusion fill using depth-sorted iterative local "
         "patching.  Breaks holes into connected components, sorts "
         "back-to-front by depth, and inpaints each patch locally with "
         "LaMa so each fill becomes context for the next."
+    )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Fills holes back-to-front in small local patches. "
+        "Can help layered scenes; slower than a single full-mask inpaint."
     )
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {

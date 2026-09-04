@@ -24,8 +24,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from flask import Flask, Response, jsonify, request, send_file, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file
+from werkzeug.exceptions import HTTPException
 from PIL import Image
+
+from pystereo_core.logging_config import ensure_stderr_info_logging, pystereo_data_dir
+
+ensure_stderr_info_logging(log_file_name="pystereo-web.log")
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -44,23 +49,7 @@ def _bundle_root() -> Path:
 
 def _outputs_dir() -> Path:
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        if sys.platform == "darwin":
-            return (
-                Path.home()
-                / "Library"
-                / "Application Support"
-                / "PyStereo"
-                / "outputs"
-            )
-        if sys.platform == "win32":
-            local = os.environ.get("LOCALAPPDATA")
-            if local:
-                return Path(local) / "PyStereo" / "outputs"
-            return Path.home() / "AppData" / "Local" / "PyStereo" / "outputs"
-        xdg = os.environ.get("XDG_DATA_HOME")
-        if xdg:
-            return Path(xdg) / "pystereo" / "outputs"
-        return Path.home() / ".local" / "share" / "pystereo" / "outputs"
+        return pystereo_data_dir() / "outputs"
     return _dev_root() / "outputs"
 
 
@@ -78,7 +67,35 @@ def _settings_path() -> Path:
 
 _USER_SETTINGS_KEYS = frozenset({
     "depth_model", "max_dim", "method",
+    # Cache & memory (see the "Cache & memory" panel in the web UI)
+    "disable_cache", "sharp_cache_max_mb", "outputs_keep", "sharp_idle_s",
+    # Integration service (POST /transform for other programs)
+    "service_enabled",
 })
+
+#: Result folders kept under ``outputs/`` (oldest are pruned after each run).
+#: Only the run on screen is ever read back; older folders are just history
+#: on disk. TODO: add a way to browse past results in the web UI, then a
+#: larger default would earn its space.
+DEFAULT_OUTPUTS_KEEP = 10
+
+
+def _setting_int(saved: dict[str, Any], key: str, default: int, minimum: int = 0) -> int:
+    try:
+        return max(minimum, int(saved.get(key, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _setting_bool(saved: dict[str, Any], key: str, default: bool = False) -> bool:
+    val = saved.get(key, default)
+    if isinstance(val, str):
+        return val.strip().lower() in ("1", "true", "yes", "on")
+    return bool(val)
+
+
+def _form_flag(name: str) -> bool:
+    return (request.form.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _load_user_settings() -> dict[str, Any]:
@@ -100,6 +117,56 @@ def _save_user_settings(data: dict[str, Any]) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(merged, indent=2), encoding="utf-8")
 
+
+#: Set by hosts that start the server on the user's explicit request (the
+#: desktop GUI's "Start server" button), which counts as enabling it.
+_service_forced = False
+
+
+def force_service_enabled(enabled: bool) -> None:
+    global _service_forced
+    _service_forced = bool(enabled)
+
+
+def _service_enabled() -> bool:
+    """Whether other programs may call ``POST /transform``.
+
+    Off by default. Turned on by the web UI setting ``service_enabled``, the
+    ``PYSTEREO_SERVICE=1`` environment variable, or a host that called
+    ``force_service_enabled``. The web UI itself never needs it.
+    """
+    if _service_forced:
+        return True
+    env = os.environ.get("PYSTEREO_SERVICE", "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    return _setting_bool(_load_user_settings(), "service_enabled")
+
+
+_cache_settings_applied = False
+
+
+def _apply_cache_settings(saved: dict[str, Any]) -> None:
+    """Push persisted cache / memory settings into the SHARP module.
+
+    Safe to call before ml-sharp is importable: the module only needs torch.
+    """
+    global _cache_settings_applied
+    try:
+        from pystereo_core.stereo import sharp_predict
+    except Exception:
+        return
+    _cache_settings_applied = True
+    if "sharp_idle_s" in saved:
+        try:
+            sharp_predict.set_idle_unload_s(float(saved["sharp_idle_s"]))
+        except (TypeError, ValueError):
+            pass
+    if "sharp_cache_max_mb" in saved:
+        sharp_predict.set_cache_max_mb(
+            _setting_int(saved, "sharp_cache_max_mb", sharp_predict.DEFAULT_CACHE_MAX_MB),
+        )
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -117,6 +184,13 @@ def _configure_logger(name: str) -> logging.Logger:
 
 
 LOGGER = _configure_logger("pystereo-web")
+WEB_LOG_PATH: Path | None = None
+try:
+    from pystereo_core.logging_config import attach_file_handler, web_log_path
+
+    WEB_LOG_PATH = attach_file_handler(LOGGER, "pystereo-web.log") or web_log_path()
+except Exception:
+    WEB_LOG_PATH = None
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
 
@@ -138,12 +212,32 @@ def gui_log(message: str) -> None:
             pass
 
 
+def _inference_failed_payload() -> dict[str, str]:
+    """JSON body for failed inference; points at the on-disk log when available."""
+    if WEB_LOG_PATH is not None:
+        return {
+            "error": f"Inference failed. Check logs at {WEB_LOG_PATH}",
+            "log_path": str(WEB_LOG_PATH),
+            "log_url": "/api/logs",
+        }
+    return {"error": "Inference failed; check server logs."}
+
+
 # ---------------------------------------------------------------------------
 # AI model setup (lazy)
 # ---------------------------------------------------------------------------
 
 _pipeline_singleton: Any = None
 _pipeline_lock = threading.Lock()
+
+
+def get_pipeline() -> Any:
+    """The pipeline this process shares. Used by the desktop GUI too.
+
+    The GUI's batch worker runs beside the service this module serves, so
+    both go through one pipeline and one set of resident weights.
+    """
+    return _get_pipeline()
 
 
 def _get_depth_estimator() -> Any:
@@ -184,17 +278,21 @@ def _get_pipeline() -> Any:
             from pystereo_core.stereo.config import StereoSettings
             from pystereo_core.stereo.pipeline import StereoPipeline
 
-            settings = StereoSettings.from_env()
             saved = _load_user_settings()
+            saved_method = (saved.get("method") or "").strip().lower() or None
+            settings = StereoSettings.from_env(method=saved_method)
             overrides: dict[str, Any] = {}
             if "max_dim" in saved:
                 try:
                     overrides["max_processing_dim"] = max(512, int(saved["max_dim"]))
                 except (ValueError, TypeError):
                     pass
+            if _setting_bool(saved, "disable_cache"):
+                overrides["sharp_disk_cache"] = False
             if overrides:
                 settings = dc_replace(settings, **overrides)
             _pipeline_singleton = StereoPipeline(settings=settings)
+            _apply_cache_settings(saved)
         return _pipeline_singleton
 
 
@@ -215,6 +313,25 @@ def _suppress_flask_startup_noise() -> None:
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
+
+
+@app.errorhandler(Exception)
+def _log_unhandled_exception(exc: Exception) -> tuple[Any, int]:
+    if isinstance(exc, HTTPException):
+        return exc
+    LOGGER.exception("Unhandled request error")
+    return jsonify({"error": str(exc)}), 500
+
+
+@app.after_request
+def _no_cache_dynamic(response: Response) -> Response:
+    if (
+        request.path == "/"
+        or request.path.startswith("/api/")
+        or request.path.endswith((".js", ".css", ".html"))
+    ):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.errorhandler(413)
@@ -239,6 +356,32 @@ def _model_status_payload() -> dict[str, Any]:
     from pystereo_core.download import get_download_manager
 
     return get_download_manager().status_dict()
+
+
+def _attach_sharp_status(payload: dict[str, Any]) -> dict[str, Any]:
+    """Add SHARP checkpoint fields expected by the web UI."""
+    from pystereo_core.download import get_download_manager
+
+    mgr = get_download_manager()
+    ready = mgr.is_sharp_model_local()
+    payload["sharp_ready"] = ready
+    sharp_art = mgr._artifacts.get("sharp")
+    downloading = (
+        not ready
+        and sharp_art is not None
+        and sharp_art.state in ("queued", "downloading")
+    )
+    payload["sharp_downloading"] = downloading
+    payload["sharp_queued"] = downloading and sharp_art.state == "queued"
+    if downloading and sharp_art is not None:
+        payload["sharp_percent"] = int(sharp_art.percent or 0)
+        payload["sharp_bytes_downloaded"] = int(sharp_art.bytes_downloaded or 0)
+        payload["sharp_bytes_total"] = int(sharp_art.bytes_total or 0)
+    else:
+        payload["sharp_percent"] = 100 if ready else 0
+        payload["sharp_bytes_downloaded"] = 0
+        payload["sharp_bytes_total"] = 0
+    return payload
 
 
 def _model_not_ready_response() -> tuple[Any, int]:
@@ -274,7 +417,11 @@ def favicon() -> Any:
 
 @app.route("/")
 def index() -> Any:
-    return send_from_directory(str(STATIC_DIR), "index.html")
+    from pystereo_core._version import __version__ as VERSION
+
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    html = html.replace("{{version}}", VERSION)
+    return Response(html, mimetype="text/html")
 
 
 # ---------------------------------------------------------------------------
@@ -287,12 +434,22 @@ def health() -> Any:
     """Media service readiness probe."""
     from pystereo_core._version import __version__ as VERSION
 
+    if not _service_enabled():
+        return jsonify({
+            "ok": False,
+            "kind": "stereo",
+            "name": "pystereo",
+            "version": VERSION,
+            "service_enabled": False,
+            "error": "Integration service is off. Enable it in the PyStereo web UI.",
+        }), 503
     status = _model_status_payload()
     return jsonify({
         "ok": True,
         "kind": "stereo",
         "name": "pystereo",
         "version": VERSION,
+        "service_enabled": True,
         "model_ready": status.get("state") == "ready",
         "model_state": status.get("state"),
     })
@@ -309,6 +466,7 @@ def api_health() -> Any:
         "ok": True,
         "app": "pystereo-web",
         "version": VERSION,
+        "service_enabled": _service_enabled(),
         "model_ready": status.get("state") == "ready",
         "model_state": status.get("state"),
         "device": registry.device,
@@ -321,9 +479,66 @@ def api_health() -> Any:
 # ---------------------------------------------------------------------------
 
 
+@app.route("/api/logs", methods=["GET"])
+def download_logs() -> Any:
+    """Download the PyStereo web log file (for packaged apps with no console)."""
+    path = WEB_LOG_PATH
+    if path is None or not path.is_file():
+        return jsonify({"error": "Log file not available"}), 404
+    for handler in LOGGER.handlers:
+        try:
+            handler.flush()
+        except Exception:
+            pass
+    return send_file(
+        path,
+        mimetype="text/plain; charset=utf-8",
+        as_attachment=True,
+        download_name="pystereo-web.log",
+    )
+
+
 @app.route("/api/model/status", methods=["GET"])
 def api_model_status() -> Any:
-    return jsonify(_model_status_payload())
+    return jsonify(_attach_sharp_status(_model_status_payload()))
+
+
+@app.route("/api/model/download-sharp", methods=["POST"])
+def api_model_download_sharp() -> Any:
+    """Start a background download of the SHARP checkpoint."""
+    from pystereo_core.download import get_download_manager
+
+    mgr = get_download_manager()
+    mgr.ensure_sharp_model_async()
+    return jsonify(_attach_sharp_status(mgr.status_dict()))
+
+
+@app.route("/api/model/cancel-sharp", methods=["POST"])
+def api_model_cancel_sharp() -> Any:
+    """Cancel an in-progress SHARP checkpoint download."""
+    from pystereo_core.download import get_download_manager
+
+    mgr = get_download_manager()
+    result = mgr.cancel_sharp_download()
+    payload = _attach_sharp_status(mgr.status_dict())
+    payload["cancelled"] = result.get("cancelled", False)
+    return jsonify(payload)
+
+
+@app.route("/api/model/delete-sharp", methods=["POST"])
+def api_model_delete_sharp() -> Any:
+    """Delete the cached SHARP checkpoint to free disk space."""
+    from pystereo_core.download import get_download_manager
+
+    mgr = get_download_manager()
+    try:
+        result = mgr.delete_sharp_model()
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    payload = _attach_sharp_status(mgr.status_dict())
+    payload["deleted_bytes"] = result.get("deleted_bytes", 0)
+    payload["path"] = result.get("path")
+    return jsonify(payload)
 
 
 @app.route("/api/model/download", methods=["POST"])
@@ -376,20 +591,24 @@ def api_model_delete() -> Any:
 @app.route("/api/depth-models", methods=["GET"])
 def api_depth_models() -> Any:
     """Return available depth models and their download status."""
-    from pystereo_core.depth import DEPTH_MODELS
-    from pystereo_core.download import get_download_manager
+    try:
+        from pystereo_core.depth import DEPTH_MODELS
+        from pystereo_core.download import get_download_manager
 
-    mgr = get_download_manager()
-    result = []
-    for size, info in DEPTH_MODELS.items():
-        result.append({
-            "size": size,
-            "name": info["name"],
-            "license": info["license"],
-            "size_mb": info["size_mb"],
-            "downloaded": mgr.is_depth_model_local(size),
-        })
-    return jsonify(result)
+        mgr = get_download_manager()
+        result = []
+        for size, info in DEPTH_MODELS.items():
+            result.append({
+                "size": size,
+                "name": info["name"],
+                "license": info["license"],
+                "size_mb": info["size_mb"],
+                "downloaded": mgr.is_depth_model_local(size),
+            })
+        return jsonify(result)
+    except Exception as exc:
+        LOGGER.exception("Failed to list depth models")
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/depth-models/download", methods=["POST"])
@@ -439,20 +658,221 @@ def api_settings_put() -> Any:
             from dataclasses import replace as dc_replace
 
             overrides: dict[str, Any] = {}
+            if "method" in saved:
+                method_raw = (str(saved["method"]) or "").strip().lower()
+                from pystereo_core.stereo.methods import available_methods
+                if method_raw in available_methods():
+                    overrides["stereo_method"] = method_raw
             if "max_dim" in saved:
                 try:
                     overrides["max_processing_dim"] = max(512, int(saved["max_dim"]))
                 except (ValueError, TypeError):
                     pass
+            if "disable_cache" in saved:
+                overrides["sharp_disk_cache"] = not _setting_bool(saved, "disable_cache")
             if overrides:
-                _pipeline_singleton.settings = dc_replace(
+                new_settings = dc_replace(
                     _pipeline_singleton.settings, **overrides,
                 )
+                if "stereo_method" in overrides:
+                    new_settings = new_settings.with_method_defaults()
+                if new_settings.inpaint_backend != _pipeline_singleton.settings.inpaint_backend:
+                    # The new method wants a different inpainter (clean_fill
+                    # and combo_fill ask for aotgan) and the pipeline cannot
+                    # swap the one it holds. Drop it so the next request
+                    # rebuilds from the settings just saved, the way a fresh
+                    # start would - assigning the settings alone would leave
+                    # them naming a backend that is not the one running.
+                    _pipeline_singleton = None
+                else:
+                    _pipeline_singleton.settings = new_settings
+
+    _apply_cache_settings(saved)
 
     if "depth_model" in saved:
         _ensure_registry(model_size=str(saved["depth_model"]))
 
     return jsonify(saved)
+
+
+# ---------------------------------------------------------------------------
+# Routes - cache & memory
+# ---------------------------------------------------------------------------
+
+
+def _result_dirs() -> list[tuple[Path, int, float]]:
+    """``(dir, bytes, mtime)`` for each result folder under ``outputs/``."""
+    entries: list[tuple[Path, int, float]] = []
+    if not OUTPUTS_DIR.is_dir():
+        return entries
+    for child in OUTPUTS_DIR.iterdir():
+        if not child.is_dir() or not _result_id_ok(child.name):
+            continue
+        size = 0
+        try:
+            mtime = child.stat().st_mtime
+            for f in child.iterdir():
+                if f.is_file():
+                    size += f.stat().st_size
+        except OSError:
+            continue
+        entries.append((child, size, mtime))
+    return entries
+
+
+def _outputs_stats() -> dict[str, Any]:
+    entries = _result_dirs()
+    return {
+        "path": str(OUTPUTS_DIR),
+        "bytes": sum(size for _, size, _ in entries),
+        "files": len(entries),
+    }
+
+
+def _prune_outputs(keep: int, protect: str | None = None) -> int:
+    """Delete the oldest result folders beyond ``keep``. ``0`` keeps all."""
+    if keep <= 0:
+        return 0
+    entries = sorted(_result_dirs(), key=lambda e: e[2], reverse=True)
+    removed = 0
+    for path, _, _ in entries[keep:]:
+        if protect is not None and path.name == protect:
+            continue
+        shutil.rmtree(path, ignore_errors=True)
+        removed += 1
+    if removed:
+        LOGGER.info("Pruned %d old result folder(s), keeping %d", removed, keep)
+    return removed
+
+
+def _clear_outputs() -> dict[str, int]:
+    deleted_bytes = 0
+    deleted_files = 0
+    for path, size, _ in _result_dirs():
+        shutil.rmtree(path, ignore_errors=True)
+        deleted_bytes += size
+        deleted_files += 1
+    LOGGER.info("Results cleared: %d folder(s), %d bytes", deleted_files, deleted_bytes)
+    return {"deleted_bytes": deleted_bytes, "deleted_files": deleted_files}
+
+
+def _loaded_models() -> list[str]:
+    """Names of model weights currently resident in memory."""
+    names: list[str] = []
+    try:
+        from pystereo_core.stereo import sharp_predict
+
+        if sharp_predict.is_predictor_loaded():
+            names.append("SHARP predictor")
+    except Exception:
+        pass
+    try:
+        from pystereo_core.registry import get_registry
+
+        registry = get_registry()
+        for capability, model in registry._models.items():
+            if model.is_loaded():
+                names.append(f"{capability} ({model.name})")
+    except Exception:
+        pass
+    with _pipeline_lock:
+        pipe = _pipeline_singleton
+    if pipe is not None:
+        if getattr(getattr(pipe, "_segmenter", None), "_model", None) is not None:
+            names.append("segmenter (BiRefNet)")
+        try:
+            if pipe._inpainter.is_loaded():
+                names.append(f"inpainter ({pipe.settings.inpaint_backend})")
+        except Exception:
+            pass
+    return names
+
+
+def _cache_payload() -> dict[str, Any]:
+    sharp: dict[str, Any]
+    idle_s: float | None = None
+    if not _cache_settings_applied:
+        # First look at the panel before any generation: make the reported
+        # idle timeout / cache limit match settings.json, not the env defaults.
+        _apply_cache_settings(_load_user_settings())
+    try:
+        from pystereo_core.stereo import sharp_predict
+
+        sharp = sharp_predict.cache_stats()
+        idle_s = sharp_predict.get_idle_unload_s()
+    except Exception as exc:
+        sharp = {"path": None, "bytes": 0, "files": 0, "error": str(exc)}
+    saved = _load_user_settings()
+    return {
+        "sharp": sharp,
+        "outputs": _outputs_stats(),
+        "outputs_keep": _setting_int(saved, "outputs_keep", DEFAULT_OUTPUTS_KEEP),
+        "sharp_idle_s": idle_s,
+        "loaded_models": _loaded_models(),
+    }
+
+
+@app.route("/api/cache", methods=["GET"])
+def api_cache_get() -> Any:
+    return jsonify(_cache_payload())
+
+
+@app.route("/api/cache/clear", methods=["POST"])
+def api_cache_clear() -> Any:
+    """Delete on-disk caches. JSON body: ``{"target": "sharp" | "outputs" | "all"}``."""
+    body = request.get_json(silent=True) or {}
+    target = str(body.get("target") or "all").strip().lower()
+    if target not in ("sharp", "outputs", "all"):
+        return jsonify({"error": f"Unknown target: {target}"}), 400
+    if not PREDICT_LOCK.acquire(blocking=False):
+        return jsonify({"error": "A generation is running; try again when it finishes."}), 409
+    try:
+        deleted: dict[str, Any] = {}
+        if target in ("sharp", "all"):
+            from pystereo_core.stereo import sharp_predict
+
+            deleted["sharp"] = sharp_predict.clear_cache()
+        if target in ("outputs", "all"):
+            deleted["outputs"] = _clear_outputs()
+    finally:
+        PREDICT_LOCK.release()
+    payload = _cache_payload()
+    payload["deleted"] = deleted
+    return jsonify(payload)
+
+
+@app.route("/api/models/unload", methods=["POST"])
+def api_models_unload() -> Any:
+    """Free every resident model (SHARP, depth, segmenter, inpainter) now."""
+    if not PREDICT_LOCK.acquire(blocking=False):
+        return jsonify({"error": "A generation is running; try again when it finishes."}), 409
+    try:
+        released: list[str] = []
+        try:
+            from pystereo_core.stereo import sharp_predict
+
+            if sharp_predict.unload_predictor():
+                released.append("SHARP predictor")
+        except Exception:
+            pass
+        try:
+            from pystereo_core.registry import get_registry
+
+            registry = get_registry()
+            loaded = [m.name for m in registry._models.values() if m.is_loaded()]
+            registry.unload_all()
+            released.extend(loaded)
+        except Exception:
+            pass
+        with _pipeline_lock:
+            pipe = _pipeline_singleton
+        if pipe is not None:
+            released.extend(pipe.unload_models())
+    finally:
+        PREDICT_LOCK.release()
+    payload = _cache_payload()
+    payload["released"] = released
+    return jsonify(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -462,10 +882,40 @@ def api_settings_put() -> Any:
 
 @app.route("/api/stereo-methods", methods=["GET"])
 def api_stereo_methods() -> Any:
-    from pystereo_core.stereo.methods import available_methods
+    try:
+        from pystereo_core.sharp_imports import is_sharp_code_available
+        from pystereo_core.stereo.config import DEFAULT_METHOD
+        from pystereo_core.stereo.methods import list_methods_for_ui
 
-    methods = sorted(available_methods().keys())
-    return jsonify(methods)
+        sharp_code = is_sharp_code_available()
+        taichi_render_available = False
+        try:
+            from pystereo_core.stereo.taichi_render import is_taichi_available
+
+            taichi_render_available = is_taichi_available()
+        except Exception:
+            pass
+        result = []
+        for name, cls in list_methods_for_ui():
+            if not cls.needs_depth and not sharp_code:
+                continue
+            entry: dict[str, Any] = {
+                "name": name,
+                "label": cls.label,
+                "needs_depth": cls.needs_depth,
+                "deprecated": cls.deprecated,
+                "default": name == DEFAULT_METHOD,
+                "ui_info": cls.ui_info,
+                "uses_taichi": bool(getattr(cls, "uses_taichi", False)),
+            }
+            result.append(entry)
+        return jsonify({
+            "methods": result,
+            "taichi_render_available": taichi_render_available,
+        })
+    except Exception as exc:
+        LOGGER.exception("Failed to list stereo methods")
+        return jsonify({"error": str(exc)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +926,10 @@ def api_stereo_methods() -> Any:
 @app.route("/transform", methods=["POST"])
 def transform() -> Any:
     """Media service endpoint: JPEG in, SBS JPEG bytes out."""
+    if not _service_enabled():
+        return jsonify({
+            "error": "Integration service is off. Enable it in the PyStereo web UI.",
+        }), 403
     if "file" not in request.files:
         return jsonify({"error": "Missing file field"}), 400
     upload = request.files["file"]
@@ -483,16 +937,36 @@ def transform() -> Any:
         return jsonify({"error": "Empty filename"}), 400
 
     name = Path(upload.filename).name
-    blocked = _require_model_ready()
-    if blocked is not None:
-        gui_log("  Failed - stereo model not ready (download required)")
-        return blocked
 
     method_override = (request.form.get("method") or "").strip().lower() or None
     max_dim_raw = (request.form.get("max_dim") or "").strip()
     depth_model = (request.form.get("depth_model") or "small").strip().lower()
 
-    _ensure_registry(model_size=depth_model)
+    # Output budget, applied after synthesis. Unlike max_dim (a processing
+    # dimension) this caps the delivered SBS, so the render keeps its
+    # supersampling and the caller does not receive a 50 MP JPEG.
+    max_pixels = 0
+    max_pixels_raw = (request.form.get("max_pixels") or "").strip()
+    if max_pixels_raw:
+        try:
+            max_pixels = max(0, int(max_pixels_raw))
+        except ValueError:
+            LOGGER.warning("Ignoring invalid max_pixels %r", max_pixels_raw)
+
+    effective_method = method_override or _get_pipeline().settings.stereo_method
+    method_needs_depth = True
+    try:
+        from pystereo_core.stereo.methods import get_method
+        method_needs_depth = get_method(effective_method).needs_depth
+    except ValueError:
+        pass
+
+    if method_needs_depth:
+        blocked = _require_model_ready()
+        if blocked is not None:
+            gui_log("  Failed - stereo model not ready (download required)")
+            return blocked
+        _ensure_registry(model_size=depth_model)
     gui_log(f"Generating stereo SBS for {name}...")
 
     t0 = time.perf_counter()
@@ -503,7 +977,7 @@ def transform() -> Any:
             gui_log(f"  Running depth + stereo ({w}x{h})...")
 
             depth_estimator = _get_depth_estimator()
-            if depth_estimator is None:
+            if depth_estimator is None and method_needs_depth:
                 gui_log("  Failed - depth model not loaded")
                 return jsonify({"error": "Depth model not loaded"}), 503
 
@@ -515,14 +989,11 @@ def transform() -> Any:
                     overrides["max_processing_dim"] = max(512, int(max_dim_raw))
                 except ValueError:
                     pass
+            if _form_flag("no_cache"):
+                overrides["sharp_disk_cache"] = False
 
             if overrides:
-                from dataclasses import replace as dc_replace
-
-                from pystereo_core.stereo.pipeline import StereoPipeline
-
-                settings = dc_replace(pipeline.settings, **overrides)
-                local_pipeline = StereoPipeline(settings=settings)
+                local_pipeline = pipeline.derive(**overrides)
                 sbs_img = local_pipeline.synthesize_with_depth_estimator(
                     rgb_pil, depth_estimator, method=method_override,
                 )
@@ -533,9 +1004,28 @@ def transform() -> Any:
     except Exception:
         LOGGER.exception("Inference failed for %s", name)
         gui_log(f"  Failed - {name} (see terminal for details)")
-        return jsonify({"error": "Inference failed"}), 500
+        return jsonify(_inference_failed_payload()), 500
+
+    if max_pixels:
+        from pystereo_core.stereo.fit import fit_to_pixel_budget
+
+        before_w, before_h = sbs_img.size
+        sbs_img = fit_to_pixel_budget(sbs_img, max_pixels, even_width=True)
+        if sbs_img.size != (before_w, before_h):
+            msg = (
+                f"Fitted SBS {before_w}x{before_h} ({before_w * before_h / 1e6:.1f} MP)"
+                f" -> {sbs_img.size[0]}x{sbs_img.size[1]}"
+                f" ({sbs_img.size[0] * sbs_img.size[1] / 1e6:.1f} MP,"
+                f" budget {max_pixels / 1e6:.1f} MP)"
+            )
+            LOGGER.info(msg)
+            gui_log(f"  {msg}")
 
     elapsed = time.perf_counter() - t0
+    LOGGER.info(
+        "Transformed %s (%dx%d, method=%s) in %.1fs",
+        name, w, h, effective_method, elapsed,
+    )
     gui_log(f"  Done - {name} ({elapsed:.1f}s)")
 
     buf = io.BytesIO()
@@ -566,13 +1056,38 @@ def api_generate() -> Any:
     if not upload.filename:
         return jsonify({"error": "Empty filename"}), 400
 
-    blocked = _require_model_ready()
-    if blocked is not None:
-        return blocked
-
     method_override = (request.form.get("method") or "").strip().lower() or None
     max_dim_raw = (request.form.get("max_dim") or "").strip()
     depth_model = (request.form.get("depth_model") or "small").strip().lower()
+    disable_cache = _form_flag("disable_cache")
+
+    effective_method = method_override or _get_pipeline().settings.stereo_method
+    gen_needs_depth = True
+    try:
+        from pystereo_core.stereo.methods import get_method as _get_stereo_method
+
+        method_obj = _get_stereo_method(effective_method)
+        gen_needs_depth = method_obj.needs_depth
+        if not gen_needs_depth:
+            from pystereo_core.sharp_imports import is_sharp_code_available
+
+            if not is_sharp_code_available():
+                return jsonify({
+                    "error": (
+                        "This build does not include ml-sharp. "
+                        "Choose a depth-based method or rebuild with "
+                        "git submodule update --init ml-sharp."
+                    ),
+                }), 503
+    except ValueError:
+        pass
+
+    if gen_needs_depth:
+        blocked = _require_model_ready()
+        if blocked is not None:
+            return blocked
+        _ensure_registry(model_size=depth_model)
+
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     result_id = str(uuid.uuid4())
     result_dir = OUTPUTS_DIR / result_id
@@ -582,33 +1097,11 @@ def api_generate() -> Any:
     input_path = result_dir / f"input{ext}"
     upload.save(str(input_path))
 
-    _ensure_registry(model_size=depth_model)
-
     t0 = time.perf_counter()
     try:
         with PREDICT_LOCK:
             rgb_pil = Image.open(input_path).convert("RGB")
             w, h = rgb_pil.size
-
-            depth_estimator = _get_depth_estimator()
-            if depth_estimator is None:
-                shutil.rmtree(result_dir, ignore_errors=True)
-                return jsonify({"error": "Depth model not loaded"}), 503
-
-            # Generate depth map
-            import numpy as np
-
-            if hasattr(depth_estimator, "process_raw"):
-                depth_f32 = depth_estimator.process_raw(rgb_pil)
-                depth_u8 = (depth_f32 * 255).clip(0, 255).astype(np.uint8)
-                depth_pil = Image.fromarray(depth_u8, mode="L")
-            else:
-                depth_pil = depth_estimator.process(rgb_pil)
-                depth_f32 = np.array(
-                    depth_pil.convert("L"), dtype=np.float32,
-                ) / 255.0
-
-            depth_pil.save(str(result_dir / "depth.png"))
 
             # Resolve pipeline with per-request overrides
             pipeline = _get_pipeline()
@@ -618,37 +1111,105 @@ def api_generate() -> Any:
                     overrides["max_processing_dim"] = max(512, int(max_dim_raw))
                 except ValueError:
                     pass
+            # The checkbox is the source of truth for this request; the
+            # persisted setting only sets the pipeline default for /transform.
+            if pipeline.settings.sharp_disk_cache == disable_cache:
+                overrides["sharp_disk_cache"] = not disable_cache
             if overrides:
-                from dataclasses import replace as dc_replace
-
-                from pystereo_core.stereo.pipeline import StereoPipeline
-
-                active_pipeline = StereoPipeline(settings=dc_replace(pipeline.settings, **overrides))
+                active_pipeline = pipeline.derive(**overrides)
             else:
                 active_pipeline = pipeline
 
-            # Warp preview (pre-inpaint intermediates)
-            warp_result = active_pipeline.warp_preview(
-                rgb_pil, depth_f32, method=method_override,
-            )
-            if warp_result is not None:
-                warp_result.warp_sbs.save(
-                    str(result_dir / "warp.jpg"), quality=95,
-                )
-                warp_result.mask_sbs.save(str(result_dir / "mask.png"))
+            from pystereo_core.stereo.timing import record_step
 
-            # Generate SBS
-            sbs_img = active_pipeline.synthesize(
-                rgb_pil, depth_f32, method=method_override,
-            )
+            warp_result = None
+            sharp_intermediates: dict[str, Any] = {}
+            if not gen_needs_depth:
+                sbs_img = active_pipeline.synthesize_with_depth_estimator(
+                    rgb_pil, None, method=method_override,
+                    intermediates=sharp_intermediates,
+                )
+            else:
+                depth_estimator = _get_depth_estimator()
+                if depth_estimator is None:
+                    shutil.rmtree(result_dir, ignore_errors=True)
+                    return jsonify({"error": "Depth model not loaded"}), 503
+
+                # Generate depth map
+                import numpy as np
+
+                t_step = time.perf_counter()
+                if hasattr(depth_estimator, "process_raw"):
+                    depth_f32 = depth_estimator.process_raw(rgb_pil)
+                    depth_u8 = (depth_f32 * 255).clip(0, 255).astype(np.uint8)
+                    depth_pil = Image.fromarray(depth_u8, mode="L")
+                else:
+                    depth_pil = depth_estimator.process(rgb_pil)
+                    depth_f32 = np.array(
+                        depth_pil.convert("L"), dtype=np.float32,
+                    ) / 255.0
+                record_step(
+                    sharp_intermediates, "Depth estimation",
+                    time.perf_counter() - t_step,
+                )
+
+                depth_pil.save(str(result_dir / "depth.png"))
+
+                # Warp preview (pre-inpaint intermediates)
+                t_step = time.perf_counter()
+                seg_loaded = active_pipeline.segmenter_loaded()
+                warp_result = active_pipeline.warp_preview(
+                    rgb_pil, depth_f32, method=method_override,
+                )
+                if warp_result is not None:
+                    warp_result.warp_sbs.save(
+                        str(result_dir / "warp.jpg"), quality=95,
+                    )
+                    warp_result.mask_sbs.save(str(result_dir / "mask.png"))
+                    load_note = (
+                        " (model load)"
+                        if active_pipeline.segmenter_loaded() and not seg_loaded
+                        else ""
+                    )
+                    record_step(
+                        sharp_intermediates, "Warp preview" + load_note,
+                        time.perf_counter() - t_step,
+                    )
+
+                # Generate SBS
+                sbs_img = active_pipeline.synthesize(
+                    rgb_pil, depth_f32, method=method_override,
+                    intermediates=sharp_intermediates,
+                )
             sbs_img.save(str(result_dir / "sbs.jpg"), quality=95)
 
+            if sharp_intermediates.get("splat_rgb") is not None:
+                Image.fromarray(sharp_intermediates["splat_rgb"]).save(
+                    str(result_dir / "splat.jpg"), quality=95,
+                )
+            if sharp_intermediates.get("depth01") is not None:
+                import numpy as np
+
+                d01 = sharp_intermediates["depth01"]
+                d_u8 = (d01 * 255).clip(0, 255).astype(np.uint8)
+                Image.fromarray(d_u8, mode="L").save(str(result_dir / "depth.png"))
+
+    except FileNotFoundError as exc:
+        LOGGER.exception("Model not found for %s", upload.filename)
+        shutil.rmtree(result_dir, ignore_errors=True)
+        return jsonify({"error": str(exc)}), 503
     except Exception:
         LOGGER.exception("Inference failed for %s", upload.filename)
         shutil.rmtree(result_dir, ignore_errors=True)
-        return jsonify({"error": "Inference failed; check server logs."}), 500
+        return jsonify(_inference_failed_payload()), 500
 
     elapsed = round(time.perf_counter() - t0, 3)
+    step_timings = [
+        {"label": label, "seconds": seconds}
+        for label, seconds in sharp_intermediates.get("timings", [])
+    ]
+    render_backend = sharp_intermediates.get("render_backend")
+    sharp_cache = sharp_intermediates.get("sharp_cache")
 
     meta: dict[str, Any] = {
         "id": result_id,
@@ -656,24 +1217,43 @@ def api_generate() -> Any:
         "created": datetime.now(timezone.utc).isoformat(),
         "width": w,
         "height": h,
-        "method": method_override or active_pipeline.settings.stereo_method,
+        "method": effective_method,
         "elapsed_seconds": elapsed,
+        "timings": step_timings,
+        "render_backend": render_backend,
+        "sharp_cache": sharp_cache,
+        "disable_cache": disable_cache,
     }
     (result_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    _prune_outputs(
+        _setting_int(_load_user_settings(), "outputs_keep", DEFAULT_OUTPUTS_KEEP),
+        protect=result_id,
+    )
 
     resp: dict[str, Any] = {
         "id": result_id,
         "sbs_url": f"/api/results/{result_id}/sbs.jpg",
-        "depth_url": f"/api/results/{result_id}/depth.png",
         "input_url": f"/api/results/{result_id}/input{ext}",
         "method": meta["method"],
         "width": w,
         "height": h,
         "elapsed_seconds": elapsed,
+        "timings": step_timings,
+        "render_backend": render_backend,
+        "sharp_cache": sharp_cache,
+        "disable_cache": disable_cache,
     }
-    if warp_result is not None:
-        resp["warp_url"] = f"/api/results/{result_id}/warp.jpg"
-        resp["mask_url"] = f"/api/results/{result_id}/mask.png"
+    if gen_needs_depth:
+        resp["depth_url"] = f"/api/results/{result_id}/depth.png"
+        if warp_result is not None:
+            resp["warp_url"] = f"/api/results/{result_id}/warp.jpg"
+            resp["mask_url"] = f"/api/results/{result_id}/mask.png"
+    else:
+        if sharp_intermediates.get("splat_rgb") is not None:
+            resp["splat_url"] = f"/api/results/{result_id}/splat.jpg"
+        if sharp_intermediates.get("depth01") is not None:
+            resp["depth_url"] = f"/api/results/{result_id}/depth.png"
     return jsonify(resp)
 
 

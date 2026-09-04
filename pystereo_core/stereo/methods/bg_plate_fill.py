@@ -1,4 +1,4 @@
-"""Method 2: Background-Plate Fill — hybrid z-buffer warp + stereo-consistent fill.
+"""Method 2: Background-Plate Fill - hybrid z-buffer warp + stereo-consistent fill.
 
 Builds a single inpainted "background plate" (foreground removed from the
 source image), warps it with background-depth parallax into both eyes,
@@ -118,12 +118,17 @@ def _sharpen_inpainted_region(
 
 class BgPlateFillMethod(BaseStereoMethod):
     name: ClassVar[str] = "bg_plate_fill"
-    label: ClassVar[str] = "Background Plate (Deprecated)"
+    label: ClassVar[str] = "Background Plate"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Hybrid z-buffer + cv2.remap warp with stereo-consistent "
         "background-plate fill.  Inpaints foreground out of the source "
         "once, warps the clean plate into both eyes.  Two-pass LaMa + "
         "Telea with colour correction and sharpening."
+    )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Fills holes from a shared background plate so both "
+        "eyes get matching content. Good stereo consistency, softer fills."
     )
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {
@@ -147,7 +152,7 @@ class BgPlateFillMethod(BaseStereoMethod):
     ) -> np.ndarray | None:
         """Build a uint8 mask of foreground regions to inpaint away.
 
-        Returns ``None`` when the mask covers >70 % of the image —
+        Returns ``None`` when the mask covers >70 % of the image -
         the caller falls back to per-eye inpainting.
         """
         if fg_mask is not None:

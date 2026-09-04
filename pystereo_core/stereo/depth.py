@@ -70,7 +70,7 @@ def guided_filter_depth(
         refined = gf.filter(depth_f32)
     except AttributeError:
         logger.warning(
-            "cv2.ximgproc unavailable — falling back to bilateral filter. "
+            "cv2.ximgproc unavailable - falling back to bilateral filter. "
             "Install opencv-contrib-python for best quality."
         )
         refined = _fallback_bilateral(depth_f32, guide_rgb, radius)

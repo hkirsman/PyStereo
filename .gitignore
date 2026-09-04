@@ -11,3 +11,7 @@ venv/
 .env
 outputs/
 settings.json
+.sharp_cache/
+analysis/
+Screenshot *.png
+experiments/out/

@@ -1,11 +1,11 @@
-"""Method 4: Direct Fill — per-strip anisotropic crop inpainting (no bg plate).
+"""Method 4: Direct Fill - per-strip anisotropic crop inpainting (no bg plate).
 
 Routes disocclusion holes by width after unilateral mask dilation:
 
 - **Narrow** (bounding-box width ≤ ``narrow_strip_max_px``): filled by
   mirroring adjacent background pixels (same as routed_fill).
 - **Wide** (> threshold): each connected component is inpainted directly
-  in the eye view via a tight anisotropic crop — wide horizontal context,
+  in the eye view via a tight anisotropic crop - wide horizontal context,
   minimal vertical padding.  LaMa sees only local texture and cannot
   clone distant materials.
 
@@ -55,7 +55,7 @@ def _fill_wide_direct(
 
     Each connected component gets its own tight crop (wide horizontal
     context, minimal vertical padding).  LaMa's FFCs can only see
-    textures within the crop — preventing cross-material cloning.
+    textures within the crop - preventing cross-material cloning.
     Per-component colour matching is applied before paste-back.
     """
     if not np.any(wide_mask):
@@ -136,15 +136,20 @@ def _fill_wide_direct(
 
 class DirectFillMethod(BaseStereoMethod):
     name: ClassVar[str] = "direct_fill"
-    label: ClassVar[str] = "Direct Anisotropic Fill (Deprecated)"
+    label: ClassVar[str] = "Direct Anisotropic Fill"
+    deprecated: ClassVar[bool] = True
     description: ClassVar[str] = (
         "Hybrid z-buffer warp with width-routed disocclusion fill.  "
         "Narrow strips (≤ threshold) are mirror-filled from adjacent "
         "background pixels (CPU, zero dark bias).  Wide regions are "
         "filled directly in each eye view via per-strip anisotropic "
         "crop inpainting (no background plate).  Each strip gets a "
-        "tight horizontal crop — LaMa sees only local texture.  "
+        "tight horizontal crop - LaMa sees only local texture.  "
         "Poisson seam blending + unilateral mask dilation."
+    )
+    ui_info: ClassVar[str] = (
+        "Deprecated. Mirror-fills narrow gaps; inpaints wide ones "
+        "per-eye with tight crops. No shared background plate."
     )
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {

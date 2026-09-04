@@ -61,7 +61,7 @@ def heal_depth_with_mask(
     core_fg = fg_mask > core_threshold
 
     if not np.any(core_fg):
-        logger.debug("No core foreground detected — skipping depth healing")
+        logger.debug("No core foreground detected - skipping depth healing")
         return depth_f32.copy()
 
     # -- Dilate the continuous mask outward ---------------------------------
@@ -85,7 +85,7 @@ def heal_depth_with_mask(
 
     n_missing = int(np.sum(missing))
     if n_missing == 0:
-        logger.debug("No broken foreground pixels — skipping depth healing")
+        logger.debug("No broken foreground pixels - skipping depth healing")
         return depth_f32.copy()
 
     n_ext = int(np.sum(extended_fg))

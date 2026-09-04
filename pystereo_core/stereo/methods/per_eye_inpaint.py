@@ -1,4 +1,4 @@
-"""Method 1: Per-Eye Inpaint — inverse remap warp + independent LaMa fill.
+"""Method 1: Per-Eye Inpaint - inverse remap warp + independent LaMa fill.
 
 Each eye is warped via pure inverse ``cv2.remap`` with stretch-based
 occlusion detection, then inpainted independently.  Simple and fast,
@@ -23,8 +23,13 @@ class PerEyeInpaintMethod(BaseStereoMethod):
     label: ClassVar[str] = "Per-Eye Inpaint"
     description: ClassVar[str] = (
         "Inverse cv2.remap warp with stretch-based occlusion detection. "
-        "Each eye is inpainted independently — fast but fills may differ "
+        "Each eye is inpainted independently - fast but fills may differ "
         "between eyes."
+    )
+    ui_info: ClassVar[str] = (
+        "About 15 seconds on a MacBook M4. Works well with empty rooms, "
+        "landscapes, and tunnels. Can struggle with busy foregrounds and "
+        "people - warping artifacts often show at cutoffs."
     )
 
     SETTING_OVERRIDES: ClassVar[dict[str, Any]] = {
