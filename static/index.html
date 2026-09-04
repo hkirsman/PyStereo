@@ -200,6 +200,17 @@
             </div>
             <div class="stage-card" id="stageSbs" hidden>
               <p class="stage-label">SBS Stereo</p>
+              <div class="stage-view-controls">
+                <label class="settings-check" for="crossEyedCheck">
+                  <input type="checkbox" id="crossEyedCheck" />
+                  <span>Cross-eyed</span>
+                </label>
+                <label class="settings-check" for="anaglyphCheck">
+                  <input type="checkbox" id="anaglyphCheck" />
+                  <span>Anaglyph (red-cyan)</span>
+                </label>
+                <span class="stage-view-note" id="stageViewNote"></span>
+              </div>
               <img id="stageSbsImg" class="stage-img" alt="Side-by-side stereo result" />
             </div>
             <ul class="stage-steps" id="stageSteps" hidden></ul>

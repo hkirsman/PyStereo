@@ -721,6 +721,22 @@ body.model-gate-active .app-shell > .layout {
   letter-spacing: 0.04em;
 }
 
+.stage-view-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.9rem;
+  margin: 0 0 0.6rem;
+}
+
+.stage-view-note {
+  flex: 1;
+  min-width: 12rem;
+  font-size: 0.72rem;
+  color: #7a7a7a;
+  line-height: 1.35;
+}
+
 .stage-img {
   width: 100%;
   height: auto;

@@ -64,6 +64,9 @@ const stageWarp = $("#stageWarp");
 const stageWarpImg = $("#stageWarpImg");
 const stageSbs = $("#stageSbs");
 const stageSbsImg = $("#stageSbsImg");
+const crossEyedCheck = $("#crossEyedCheck");
+const anaglyphCheck = $("#anaglyphCheck");
+const stageViewNote = $("#stageViewNote");
 const stageTiming = $("#stageTiming");
 const stageSteps = $("#stageSteps");
 
@@ -871,6 +874,7 @@ btnGenerate.addEventListener("click", async () => {
   stageDepth.hidden = true;
   stageWarp.hidden = true;
   stageSbs.hidden = true;
+  sbsSourceUrl = null;
   stageTiming.textContent = "";
   stageSteps.innerHTML = "";
   stageSteps.hidden = true;
@@ -919,10 +923,11 @@ btnGenerate.addEventListener("click", async () => {
       stageWarp.hidden = false;
     }
 
-    // Show SBS
+    // Show SBS, in whichever viewing arrangement is selected
     if (data.sbs_url) {
-      stageSbsImg.src = data.sbs_url;
+      sbsSourceUrl = data.sbs_url;
       stageSbs.hidden = false;
+      renderSbsView();
     }
 
     // Per-step timing breakdown
@@ -961,6 +966,174 @@ btnGenerate.addEventListener("click", async () => {
   updateGenerateBtn();
   loadCacheStats();
 });
+
+// -- SBS view modes ---------------------------------------------------------
+//
+// Cross-eyed and anaglyph are viewing arrangements of the pair that was
+// already rendered, so they are built here in the browser from the SBS
+// result rather than by re-running the pipeline.  The file on disk and
+// everything /transform serves stay plain parallel SBS.
+
+/** URL of the generated SBS pair - every view is rebuilt from this. */
+let sbsSourceUrl = null;
+/** Object URL of the derived view on screen, revoked when replaced. */
+let sbsViewObjectUrl = null;
+/** Bumped per render so a slow one cannot overwrite a newer one. */
+let sbsViewToken = 0;
+
+const SBS_VIEW_KEY = "pystereo.sbsView";
+
+/** Long edge of a derived view. Big enough for the lightbox, which scales
+ *  to fit the viewport, and small enough to keep encoding under a blink. */
+const SBS_VIEW_MAX_DIM = 3200;
+
+/** Dubois red-cyan matrix: the negative terms cancel the crosstalk that
+ *  makes a naive channel swap ghost so badly on real photos. Applied to
+ *  sRGB values directly, as the common implementations do. */
+const DUBOIS_RED = [0.437, 0.449, 0.164, -0.011, -0.032, -0.007];
+const DUBOIS_GREEN = [-0.062, -0.062, -0.024, 0.377, 0.761, 0.009];
+const DUBOIS_BLUE = [-0.048, -0.050, -0.017, -0.026, -0.093, 1.234];
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Could not load " + src));
+    img.src = src;
+  });
+}
+
+function sbsViewLabel(cross, anaglyph) {
+  if (anaglyph && cross) return "Anaglyph, eyes swapped - for glasses with the red lens on the right.";
+  if (anaglyph) return "Anaglyph for red-cyan glasses (red lens left). Built in the browser - the saved result stays SBS.";
+  if (cross) return "Panes swapped for cross-eyed free-viewing. Built in the browser - the saved result stays SBS.";
+  return "Parallel SBS as generated - for a viewer or headset.";
+}
+
+/** Put `src` on the SBS stage, dropping the object URL it replaces. */
+function showSbsImage(src, objectUrl, token) {
+  if (token !== sbsViewToken) {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    return;
+  }
+  if (sbsViewObjectUrl) URL.revokeObjectURL(sbsViewObjectUrl);
+  sbsViewObjectUrl = objectUrl;
+  stageSbsImg.src = src;
+}
+
+/** Blend a left/right ImageData pair into `right` in place, Dubois style. */
+function blendAnaglyph(left, right) {
+  const a = left.data;
+  const b = right.data;
+  for (let i = 0; i < b.length; i += 4) {
+    const lr = a[i], lg = a[i + 1], lb = a[i + 2];
+    const rr = b[i], rg = b[i + 1], rb = b[i + 2];
+    const red = DUBOIS_RED[0] * lr + DUBOIS_RED[1] * lg + DUBOIS_RED[2] * lb
+      + DUBOIS_RED[3] * rr + DUBOIS_RED[4] * rg + DUBOIS_RED[5] * rb;
+    const green = DUBOIS_GREEN[0] * lr + DUBOIS_GREEN[1] * lg + DUBOIS_GREEN[2] * lb
+      + DUBOIS_GREEN[3] * rr + DUBOIS_GREEN[4] * rg + DUBOIS_GREEN[5] * rb;
+    const blue = DUBOIS_BLUE[0] * lr + DUBOIS_BLUE[1] * lg + DUBOIS_BLUE[2] * lb
+      + DUBOIS_BLUE[3] * rr + DUBOIS_BLUE[4] * rg + DUBOIS_BLUE[5] * rb;
+    b[i] = red < 0 ? 0 : red > 255 ? 255 : red;
+    b[i + 1] = green < 0 ? 0 : green > 255 ? 255 : green;
+    b[i + 2] = blue < 0 ? 0 : blue > 255 ? 255 : blue;
+  }
+}
+
+async function renderSbsView() {
+  const cross = crossEyedCheck.checked;
+  const anaglyph = anaglyphCheck.checked;
+  stageViewNote.textContent = sbsViewLabel(cross, anaglyph);
+  try {
+    localStorage.setItem(SBS_VIEW_KEY, JSON.stringify({ cross, anaglyph }));
+  } catch {}
+
+  if (!sbsSourceUrl) return;
+  const token = ++sbsViewToken;
+  if (!cross && !anaglyph) {
+    showSbsImage(sbsSourceUrl, null, token);
+    return;
+  }
+
+  let source;
+  try {
+    source = await loadImage(sbsSourceUrl);
+  } catch (err) {
+    setStatus("Could not build the view: " + err.message, false, true);
+    showSbsImage(sbsSourceUrl, null, token);
+    return;
+  }
+  if (token !== sbsViewToken) return;
+
+  // The pair is one image, left eye first. An odd width would split a
+  // column into the wrong eye, so round down and drop the stray column.
+  const half = Math.floor(source.naturalWidth / 2);
+  const srcH = source.naturalHeight;
+  if (half < 1 || srcH < 1) {
+    showSbsImage(sbsSourceUrl, null, token);
+    return;
+  }
+
+  // Cross-eyed swaps which pane the left eye sees; for an anaglyph that
+  // same swap is what reversed red-cyan glasses need, so one offset pair
+  // drives both modes.
+  const paneA = cross ? half : 0;
+  const paneB = cross ? 0 : half;
+
+  const outW = anaglyph ? half : half * 2;
+  const scale = Math.min(1, SBS_VIEW_MAX_DIM / Math.max(outW, srcH));
+  const paneW = Math.max(1, Math.round(half * scale));
+  const paneH = Math.max(1, Math.round(srcH * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = anaglyph ? paneW : paneW * 2;
+  canvas.height = paneH;
+  const ctx = canvas.getContext("2d", { willReadFrequently: anaglyph });
+  if (!ctx) {
+    showSbsImage(sbsSourceUrl, null, token);
+    return;
+  }
+
+  if (anaglyph) {
+    ctx.drawImage(source, paneA, 0, half, srcH, 0, 0, paneW, paneH);
+    const leftData = ctx.getImageData(0, 0, paneW, paneH);
+    ctx.drawImage(source, paneB, 0, half, srcH, 0, 0, paneW, paneH);
+    const merged = ctx.getImageData(0, 0, paneW, paneH);
+    blendAnaglyph(leftData, merged);
+    ctx.putImageData(merged, 0, 0);
+  } else {
+    ctx.drawImage(source, paneA, 0, half, srcH, 0, 0, paneW, paneH);
+    ctx.drawImage(source, paneB, 0, half, srcH, paneW, 0, paneW, paneH);
+  }
+
+  // PNG for the anaglyph: JPEG chroma subsampling smears exactly the
+  // red/cyan edges the glasses separate on.
+  const type = anaglyph ? "image/png" : "image/jpeg";
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, 0.95));
+  if (token !== sbsViewToken) return;
+  if (!blob) {
+    showSbsImage(sbsSourceUrl, null, token);
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  showSbsImage(url, url, token);
+}
+
+function restoreSbsView() {
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(SBS_VIEW_KEY) || "null");
+  } catch {}
+  if (saved) {
+    crossEyedCheck.checked = !!saved.cross;
+    anaglyphCheck.checked = !!saved.anaglyph;
+  }
+  stageViewNote.textContent = sbsViewLabel(crossEyedCheck.checked, anaglyphCheck.checked);
+}
+
+crossEyedCheck.addEventListener("change", renderSbsView);
+anaglyphCheck.addEventListener("change", renderSbsView);
+restoreSbsView();
 
 // -- Lightbox --------------------------------------------------------------
 
