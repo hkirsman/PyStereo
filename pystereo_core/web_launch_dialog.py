@@ -14,6 +14,7 @@ from typing import Callable
 
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -189,6 +190,11 @@ class WebLaunchWindow(QWidget):
         layout.addSpacing(8)
         layout.addLayout(row)
 
+        # Qt's own HTTP client, so the probe runs on the event loop instead
+        # of blocking the UI thread on a socket for up to the timeout.
+        self._net = QNetworkAccessManager(self)
+        self._health_reply: QNetworkReply | None = None
+
         self._health_timer = QTimer(self)
         self._health_timer.setInterval(1000)
         self._health_timer.timeout.connect(self._check_server_health)
@@ -201,15 +207,25 @@ class WebLaunchWindow(QWidget):
             if err:
                 self._show_server_error(err)
                 return
-        try:
-            # /api/health, not /health: the latter is the integration service
-            # probe and answers 503 while the service endpoint is off (default).
-            with urllib.request.urlopen(f"{self._url}/api/health", timeout=1.5) as resp:
-                if resp.status == 200:
-                    self._show_server_ok()
-                    return
-        except (urllib.error.URLError, TimeoutError, OSError):
-            pass
+        if self._health_reply is not None:
+            return  # last probe still in flight - do not stack requests
+        # /api/health, not /health: the latter is the integration service
+        # probe and answers 503 while the service endpoint is off (default).
+        request = QNetworkRequest(QUrl(f"{self._url}/api/health"))
+        request.setTransferTimeout(1500)
+        self._health_reply = self._net.get(request)
+        self._health_reply.finished.connect(self._on_health_reply)
+
+    def _on_health_reply(self) -> None:
+        reply = self._health_reply
+        if reply is None:
+            return
+        self._health_reply = None
+        reply.deleteLater()
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        if reply.error() == QNetworkReply.NetworkError.NoError and status == 200:
+            self._show_server_ok()
+            return
         self._show_server_error(
             "Server is still starting, or another app is already using this port."
         )
@@ -240,6 +256,13 @@ class WebLaunchWindow(QWidget):
         self._on_quit()
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API
+        self._health_timer.stop()
+        # Clear first, so the abort's finished signal does not repaint a
+        # window that is on its way out.
+        reply, self._health_reply = self._health_reply, None
+        if reply is not None:
+            reply.abort()
+            reply.deleteLater()
         self._on_quit()
         event.accept()
 
