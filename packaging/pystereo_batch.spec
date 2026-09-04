@@ -40,11 +40,31 @@ else:
 if ICON is not None and not ICON.is_file():
     raise SystemExit(f"Missing {ICON} - run: python packaging/brand_icon.py")
 
+
+def _tree_datas(src: pathlib.Path, dest: str) -> list:
+    """Collect a directory as datas, skipping __pycache__ and .pyc.
+
+    Copying a tree wholesale also ships whatever stale bytecode the build
+    machine happened to have. Every .pyc bakes the build-time absolute path
+    into co_filename, so a traceback in the shipped app prints the builder's
+    home directory. Ship source only - the app compiles what it needs.
+    """
+    out = []
+    for path in sorted(src.rglob("*")):
+        if not path.is_file():
+            continue
+        if "__pycache__" in path.parts or path.suffix in (".pyc", ".pyo"):
+            continue
+        rel = path.relative_to(src).parent
+        out.append((str(path), str(pathlib.PurePosixPath(dest) / rel)))
+    return out
+
+
 datas = [
     (str(REPO / "version.txt"), "."),
 ]
 if (REPO / "ml-sharp" / "src").is_dir():
-    datas.append((str(REPO / "ml-sharp" / "src"), "ml-sharp/src"))
+    datas += _tree_datas(REPO / "ml-sharp" / "src", "ml-sharp/src")
 else:
     print("WARNING: ml-sharp/src missing - SHARP methods will not work in the bundle.")
     print("Run: git submodule update --init ml-sharp")
