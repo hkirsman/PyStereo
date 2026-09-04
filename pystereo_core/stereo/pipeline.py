@@ -116,10 +116,14 @@ class StereoPipeline:
         The result shares this pipeline's loaded models (segmenter,
         inpainter, method instances), so it is cheap to create per request.
         ``inpaint_backend`` cannot be overridden here - the inpainter is
-        shared, not rebuilt. Overriding ``stereo_method`` also applies that
+        shared, so swapping it would change the backend under every other
+        pipeline holding it. Overriding ``stereo_method`` also applies that
         method's ``SETTING_OVERRIDES``, so a derived pipeline matches one
         built for the method from the start - under the rest of *overrides*,
-        which win over the method defaults.
+        which win over the method defaults. When those defaults name a
+        different inpaint backend (clean_fill and combo_fill ask for
+        aotgan), the result is a fresh pipeline instead of a shared one, the
+        way :meth:`with_settings` handles the same clash.
         """
         if "inpaint_backend" in overrides:
             raise ValueError("derive() cannot change inpaint_backend; build a new StereoPipeline")
@@ -128,18 +132,12 @@ class StereoPipeline:
             # A new method brings its own SETTING_OVERRIDES, the way
             # StereoSettings.from_env applies them: underneath the caller's
             # overrides, which are explicit per-request intent and stay the
-            # last word. The inpaint backend is the exception either way -
-            # it stays with the shared inpainter.
+            # last word.
             settings = dc_replace(
-                dc_replace(
-                    settings, stereo_method=overrides["stereo_method"],
-                ).with_method_defaults(),
-                inpaint_backend=self.settings.inpaint_backend,
-            )
+                settings, stereo_method=overrides["stereo_method"],
+            ).with_method_defaults()
         settings = dc_replace(settings, **overrides)
-        clone = copy.copy(self)
-        clone.settings = settings
-        return clone
+        return self.with_settings(settings)
 
     def with_settings(self, settings: StereoSettings) -> StereoPipeline:
         """Like :meth:`derive`, but takes a whole ``StereoSettings``.
@@ -147,7 +145,9 @@ class StereoPipeline:
         For callers that already hold a settings object instead of a set of
         overrides - a stereo method running a nested pass, say. Falls back
         to a fresh pipeline when *settings* asks for a different inpaint
-        backend, since the inpainter is shared rather than rebuilt.
+        backend, since the inpainter is shared rather than rebuilt: running
+        the requested backend costs a reload, running the resident one
+        would quietly be the wrong inpainter.
         """
         if settings.inpaint_backend != self.settings.inpaint_backend:
             return StereoPipeline(settings=settings)

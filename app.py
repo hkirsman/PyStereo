@@ -676,7 +676,16 @@ def api_settings_put() -> Any:
                 )
                 if "stereo_method" in overrides:
                     new_settings = new_settings.with_method_defaults()
-                _pipeline_singleton.settings = new_settings
+                if new_settings.inpaint_backend != _pipeline_singleton.settings.inpaint_backend:
+                    # The new method wants a different inpainter (clean_fill
+                    # and combo_fill ask for aotgan) and the pipeline cannot
+                    # swap the one it holds. Drop it so the next request
+                    # rebuilds from the settings just saved, the way a fresh
+                    # start would - assigning the settings alone would leave
+                    # them naming a backend that is not the one running.
+                    _pipeline_singleton = None
+                else:
+                    _pipeline_singleton.settings = new_settings
 
     _apply_cache_settings(saved)
 
