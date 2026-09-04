@@ -34,6 +34,24 @@ def browser_url(host: str, port: int) -> str:
     return f"http://{host}:{port}"
 
 
+def _set_probe_reuse(sock: socket.socket) -> None:
+    """Make a probe bind answer "is anyone on this port?" on this platform.
+
+    POSIX: SO_REUSEADDR, so a port left in TIME_WAIT by a just-quit server
+    reads as free - werkzeug sets the same option and would bind it fine.
+    Windows: SO_REUSEADDR means the opposite there - it lets the probe bind
+    on top of a live listener and report a busy port free - so ask for
+    SO_EXCLUSIVEADDRUSE instead, which fails if anything else owns the
+    address.
+    """
+    if sys.platform == "win32":
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:
+            sock.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        return
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+
 def port_is_free(host: str, port: int) -> bool:
     """Return True when *host*/*port* can be bound for the Flask server.
 
@@ -56,7 +74,7 @@ def port_is_free(host: str, port: int) -> bool:
         return True  # unresolvable host - let the server report the real error
     family, socktype, proto, _canonname, addr = infos[0]
     with socket.socket(family, socktype, proto) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        _set_probe_reuse(sock)
         try:
             sock.bind(addr)
         except OSError:
