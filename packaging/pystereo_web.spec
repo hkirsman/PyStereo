@@ -99,6 +99,12 @@ hiddenimports = (
         "pystereo_core.web_launch_dialog",
         "pystereo_core.logging_config",
         "pystereo_core.sharp_imports",
+        # Belt-and-braces: collect_submodules("pystereo_core.stereo")
+        # above already yields these four. Listing them is safe even
+        # without taichi installed - PyInstaller resolves hiddenimports
+        # statically, so the kernel modules' top-level "import taichi"
+        # only logs a missing-module warning, and taichi_render /
+        # taichi_full import taichi lazily anyway.
         "pystereo_core.stereo._taichi_kernels",
         "pystereo_core.stereo._taichi_full_kernels",
         "pystereo_core.stereo.taichi_render",
