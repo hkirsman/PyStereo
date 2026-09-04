@@ -189,12 +189,23 @@ class StereoPipeline:
         return released
 
     def _get_method(self, name: str) -> BaseStereoMethod:
-        if name not in self._methods:
-            method = get_method(name)
-            # So a method needing a nested pass can reuse our loaded models.
-            method._owner = self
-            self._methods[name] = method
-        return self._methods[name]
+        """Return the shared instance of *name*, building it once.
+
+        Under the shared load lock, so two request threads reaching a
+        method for the first time agree on which instance is the cached
+        one instead of racing on the check.
+        """
+        method = self._methods.get(name)
+        if method is not None:
+            return method
+        with self._shared.load_lock:
+            method = self._methods.get(name)
+            if method is None:
+                method = get_method(name)
+                # So a method needing a nested pass can reuse our loaded models.
+                method._owner = self
+                self._methods[name] = method
+        return method
 
     def _preprocess(
         self,

@@ -2,60 +2,78 @@
 
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pystereo_core.stereo.methods.base import BaseStereoMethod
 
 _REGISTRY: dict[str, type[BaseStereoMethod]] = {}
+_POPULATE_LOCK = threading.Lock()
 
 
 def _populate() -> None:
+    """Import and register every method, once, whatever thread asks first.
+
+    Fills a local dict and swaps it in, so a second thread either sees the
+    empty registry and waits on the lock or sees the finished one - never a
+    half-filled registry that answers "unknown stereo method" for a name
+    the first thread has not registered yet.
+    """
+    global _REGISTRY
+
     if _REGISTRY:
         return
-    from pystereo_core.stereo.methods.per_eye_inpaint import PerEyeInpaintMethod
-    from pystereo_core.stereo.methods.bg_plate_fill import BgPlateFillMethod
-    from pystereo_core.stereo.methods.routed_fill import RoutedFillMethod
-    from pystereo_core.stereo.methods.direct_fill import DirectFillMethod
-    from pystereo_core.stereo.methods.clean_fill import CleanFillMethod
-    from pystereo_core.stereo.methods.combo_fill import ComboFillMethod
-    from pystereo_core.stereo.methods.ldi_inpaint import LdiInpaintMethod
-    from pystereo_core.stereo.methods.iterative_fill import IterativeFillMethod
-    from pystereo_core.stereo.methods.fullres_warp import FullResWarpMethod
-    from pystereo_core.stereo.methods.sharp_splat import (
-        SharpDepthMethod,
-        SharpDetailMethod,
-        SharpHiresMethod,
-        SharpAlphaMethod,
-        SharpAlphaTaichiMethod,
-        SharpMeshMethod,
-        SharpSplatMethod,
-        SharpTaichiMethod,
-    )
-    from pystereo_core.stereo.methods.sharp_taichi_full import (
-        SharpAlphaFullMethod,
-        SharpSplatFullMethod,
-    )
+    with _POPULATE_LOCK:
+        if _REGISTRY:
+            return
+        registry: dict[str, type[BaseStereoMethod]] = {}
 
-    _REGISTRY["per_eye_inpaint"] = PerEyeInpaintMethod
-    _REGISTRY["fullres_warp"] = FullResWarpMethod
-    _REGISTRY["bg_plate_fill"] = BgPlateFillMethod
-    _REGISTRY["routed_fill"] = RoutedFillMethod
-    _REGISTRY["direct_fill"] = DirectFillMethod
-    _REGISTRY["clean_fill"] = CleanFillMethod
-    _REGISTRY["combo_fill"] = ComboFillMethod
-    _REGISTRY["ldi_inpaint"] = LdiInpaintMethod
-    _REGISTRY["iterative_fill"] = IterativeFillMethod
-    _REGISTRY["sharp_splat"] = SharpSplatMethod
-    _REGISTRY["sharp_detail"] = SharpDetailMethod
-    _REGISTRY["sharp_hires"] = SharpHiresMethod
-    _REGISTRY["sharp_alpha"] = SharpAlphaMethod
-    _REGISTRY["sharp_alpha_taichi"] = SharpAlphaTaichiMethod
-    _REGISTRY["sharp_depth"] = SharpDepthMethod
-    _REGISTRY["sharp_mesh"] = SharpMeshMethod
-    _REGISTRY["sharp_taichi"] = SharpTaichiMethod
-    _REGISTRY["sharp_splat_full"] = SharpSplatFullMethod
-    _REGISTRY["sharp_alpha_full"] = SharpAlphaFullMethod
+        from pystereo_core.stereo.methods.per_eye_inpaint import PerEyeInpaintMethod
+        from pystereo_core.stereo.methods.bg_plate_fill import BgPlateFillMethod
+        from pystereo_core.stereo.methods.routed_fill import RoutedFillMethod
+        from pystereo_core.stereo.methods.direct_fill import DirectFillMethod
+        from pystereo_core.stereo.methods.clean_fill import CleanFillMethod
+        from pystereo_core.stereo.methods.combo_fill import ComboFillMethod
+        from pystereo_core.stereo.methods.ldi_inpaint import LdiInpaintMethod
+        from pystereo_core.stereo.methods.iterative_fill import IterativeFillMethod
+        from pystereo_core.stereo.methods.fullres_warp import FullResWarpMethod
+        from pystereo_core.stereo.methods.sharp_splat import (
+            SharpDepthMethod,
+            SharpDetailMethod,
+            SharpHiresMethod,
+            SharpAlphaMethod,
+            SharpAlphaTaichiMethod,
+            SharpMeshMethod,
+            SharpSplatMethod,
+            SharpTaichiMethod,
+        )
+        from pystereo_core.stereo.methods.sharp_taichi_full import (
+            SharpAlphaFullMethod,
+            SharpSplatFullMethod,
+        )
+
+        registry["per_eye_inpaint"] = PerEyeInpaintMethod
+        registry["fullres_warp"] = FullResWarpMethod
+        registry["bg_plate_fill"] = BgPlateFillMethod
+        registry["routed_fill"] = RoutedFillMethod
+        registry["direct_fill"] = DirectFillMethod
+        registry["clean_fill"] = CleanFillMethod
+        registry["combo_fill"] = ComboFillMethod
+        registry["ldi_inpaint"] = LdiInpaintMethod
+        registry["iterative_fill"] = IterativeFillMethod
+        registry["sharp_splat"] = SharpSplatMethod
+        registry["sharp_detail"] = SharpDetailMethod
+        registry["sharp_hires"] = SharpHiresMethod
+        registry["sharp_alpha"] = SharpAlphaMethod
+        registry["sharp_alpha_taichi"] = SharpAlphaTaichiMethod
+        registry["sharp_depth"] = SharpDepthMethod
+        registry["sharp_mesh"] = SharpMeshMethod
+        registry["sharp_taichi"] = SharpTaichiMethod
+        registry["sharp_splat_full"] = SharpSplatFullMethod
+        registry["sharp_alpha_full"] = SharpAlphaFullMethod
+
+        _REGISTRY = registry
 
 
 # Active methods first, all deprecated last.
