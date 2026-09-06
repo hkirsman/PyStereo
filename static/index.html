@@ -201,14 +201,13 @@
             <div class="stage-card" id="stageSbs" hidden>
               <p class="stage-label">SBS Stereo</p>
               <div class="stage-view-controls">
-                <label class="settings-check" for="crossEyedCheck">
-                  <input type="checkbox" id="crossEyedCheck" />
-                  <span>Cross-eyed</span>
-                </label>
-                <label class="settings-check" for="anaglyphCheck">
-                  <input type="checkbox" id="anaglyphCheck" />
-                  <span>Anaglyph (red-cyan)</span>
-                </label>
+                <label class="stage-view-label" for="sbsViewSelect">View</label>
+                <select id="sbsViewSelect" class="settings-select">
+                  <option value="parallel">Parallel SBS</option>
+                  <option value="cross">Cross-eyed</option>
+                  <option value="anaglyph">Anaglyph (red-cyan)</option>
+                  <option value="anaglyph_swapped">Anaglyph (cyan-red)</option>
+                </select>
                 <span class="stage-view-note" id="stageViewNote"></span>
               </div>
               <img id="stageSbsImg" class="stage-img" alt="Side-by-side stereo result" />

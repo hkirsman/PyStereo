@@ -64,8 +64,7 @@ const stageWarp = $("#stageWarp");
 const stageWarpImg = $("#stageWarpImg");
 const stageSbs = $("#stageSbs");
 const stageSbsImg = $("#stageSbsImg");
-const crossEyedCheck = $("#crossEyedCheck");
-const anaglyphCheck = $("#anaglyphCheck");
+const sbsViewSelect = $("#sbsViewSelect");
 const stageViewNote = $("#stageViewNote");
 const stageTiming = $("#stageTiming");
 const stageSteps = $("#stageSteps");
@@ -973,6 +972,11 @@ btnGenerate.addEventListener("click", async () => {
 // already rendered, so they are built here in the browser from the SBS
 // result rather than by re-running the pipeline.  The file on disk and
 // everything /transform serves stay plain parallel SBS.
+//
+// You can only look at the result one way at a time, so this is a single
+// choice.  Swapping the eyes means something different per arrangement -
+// free-viewing cross-eyed for SBS, reversed glasses for an anaglyph - so
+// each combination is its own named mode rather than a modifier toggle.
 
 /** URL of the generated SBS pair - every view is rebuilt from this. */
 let sbsSourceUrl = null;
@@ -1003,11 +1007,33 @@ function loadImage(src) {
   });
 }
 
-function sbsViewLabel(cross, anaglyph) {
-  if (anaglyph && cross) return "Anaglyph, eyes swapped - for glasses with the red lens on the right.";
-  if (anaglyph) return "Anaglyph for red-cyan glasses (red lens left). Built in the browser - the saved result stays SBS.";
-  if (cross) return "Panes swapped for cross-eyed free-viewing. Built in the browser - the saved result stays SBS.";
-  return "Parallel SBS as generated - for a viewer or headset.";
+/** The viewing arrangements, keyed by the select's value.
+ *  `swap` exchanges the eyes: for SBS that is cross-eyed free-viewing,
+ *  for an anaglyph it is glasses with the red lens on the right. */
+const SBS_VIEWS = {
+  parallel: {
+    anaglyph: false, swap: false,
+    note: "Parallel SBS as generated - for a viewer or headset.",
+  },
+  cross: {
+    anaglyph: false, swap: true,
+    note: "Panes swapped for cross-eyed free-viewing.",
+  },
+  anaglyph: {
+    anaglyph: true, swap: false,
+    note: "For red-cyan glasses - red lens over the left eye.",
+  },
+  anaglyph_swapped: {
+    anaglyph: true, swap: true,
+    note: "For reversed glasses - red lens over the right eye.",
+  },
+};
+
+const SBS_VIEW_BUILT_NOTE =
+  " Built in the browser; the saved result stays SBS.";
+
+function currentSbsView() {
+  return SBS_VIEWS[sbsViewSelect.value] || SBS_VIEWS.parallel;
 }
 
 /** Put `src` on the SBS stage, dropping the object URL it replaces. */
@@ -1041,16 +1067,17 @@ function blendAnaglyph(left, right) {
 }
 
 async function renderSbsView() {
-  const cross = crossEyedCheck.checked;
-  const anaglyph = anaglyphCheck.checked;
-  stageViewNote.textContent = sbsViewLabel(cross, anaglyph);
+  const view = currentSbsView();
+  const { anaglyph, swap } = view;
+  stageViewNote.textContent =
+    view.note + (anaglyph || swap ? SBS_VIEW_BUILT_NOTE : "");
   try {
-    localStorage.setItem(SBS_VIEW_KEY, JSON.stringify({ cross, anaglyph }));
+    localStorage.setItem(SBS_VIEW_KEY, sbsViewSelect.value);
   } catch {}
 
   if (!sbsSourceUrl) return;
   const token = ++sbsViewToken;
-  if (!cross && !anaglyph) {
+  if (!anaglyph && !swap) {
     showSbsImage(sbsSourceUrl, null, token);
     return;
   }
@@ -1074,11 +1101,11 @@ async function renderSbsView() {
     return;
   }
 
-  // Cross-eyed swaps which pane the left eye sees; for an anaglyph that
-  // same swap is what reversed red-cyan glasses need, so one offset pair
-  // drives both modes.
-  const paneA = cross ? half : 0;
-  const paneB = cross ? 0 : half;
+  // Swapping which pane the left eye sees is the whole difference between
+  // parallel and cross-eyed, and between the two anaglyph modes, so one
+  // offset pair drives all four.
+  const paneA = swap ? half : 0;
+  const paneB = swap ? 0 : half;
 
   const outW = anaglyph ? half : half * 2;
   const scale = Math.min(1, SBS_VIEW_MAX_DIM / Math.max(outW, srcH));
@@ -1122,17 +1149,15 @@ async function renderSbsView() {
 function restoreSbsView() {
   let saved = null;
   try {
-    saved = JSON.parse(localStorage.getItem(SBS_VIEW_KEY) || "null");
+    saved = localStorage.getItem(SBS_VIEW_KEY);
   } catch {}
-  if (saved) {
-    crossEyedCheck.checked = !!saved.cross;
-    anaglyphCheck.checked = !!saved.anaglyph;
-  }
-  stageViewNote.textContent = sbsViewLabel(crossEyedCheck.checked, anaglyphCheck.checked);
+  if (saved && SBS_VIEWS[saved]) sbsViewSelect.value = saved;
+  const view = currentSbsView();
+  stageViewNote.textContent =
+    view.note + (view.anaglyph || view.swap ? SBS_VIEW_BUILT_NOTE : "");
 }
 
-crossEyedCheck.addEventListener("change", renderSbsView);
-anaglyphCheck.addEventListener("change", renderSbsView);
+sbsViewSelect.addEventListener("change", renderSbsView);
 restoreSbsView();
 
 // -- Lightbox --------------------------------------------------------------

@@ -729,6 +729,18 @@ body.model-gate-active .app-shell > .layout {
   margin: 0 0 0.6rem;
 }
 
+.stage-view-label {
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+/* The panel selects stretch; here the control sits inline with its note. */
+.stage-view-controls .settings-select {
+  flex: 0 0 auto;
+  min-width: 11rem;
+  font-size: 0.8rem;
+}
+
 .stage-view-note {
   flex: 1;
   min-width: 12rem;
