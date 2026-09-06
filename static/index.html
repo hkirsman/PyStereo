@@ -200,6 +200,16 @@
             </div>
             <div class="stage-card" id="stageSbs" hidden>
               <p class="stage-label">SBS Stereo</p>
+              <div class="stage-view-controls">
+                <label class="stage-view-label" for="sbsViewSelect">View</label>
+                <select id="sbsViewSelect" class="settings-select" aria-describedby="stageViewNote">
+                  <option value="parallel">Parallel SBS</option>
+                  <option value="cross">Cross-eyed</option>
+                  <option value="anaglyph">Anaglyph (red-cyan)</option>
+                  <option value="anaglyph_swapped">Anaglyph (cyan-red)</option>
+                </select>
+                <span class="stage-view-note" id="stageViewNote" aria-live="polite"></span>
+              </div>
               <img id="stageSbsImg" class="stage-img" alt="Side-by-side stereo result" />
             </div>
             <ul class="stage-steps" id="stageSteps" hidden></ul>
