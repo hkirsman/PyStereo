@@ -62,3 +62,13 @@
 **Decision:** `compile-binaries-win.bat` runs `pip install taichi` (and fails the build if that cannot import). Both PyInstaller specs collect Taichi submodules, data files, and dynamic libs when the package is present.
 
 **Context:** macOS already did this; the Windows script did not, so Intel EXE builds on Python 3.14 shipped with no Taichi and the UI said GPU render was unavailable. Taichi wheels stop at 3.13, so the Windows script now errors instead of silently producing a torch-only zip. macOS still treats a failed Taichi install as optional (`|| echo fallback`) so an existing working Mac freeze path is unchanged.
+
+## Windows disables HuggingFace cache symlinks (2026-09-06)
+
+**Decision:** `pystereo_core/hf_env.py:configure_hf_env` sets `HF_HUB_DISABLE_SYMLINKS=1` on `win32` (never overriding an existing value), and `pystereo_core/__init__.py` calls it as its first statement.
+
+**Context:** The Hub cache keeps one blob per file under `blobs/` and points `snapshots/` at it with a relative symlink. Creating a symlink on Windows needs Developer Mode or an elevated process, so a plain user account fails the whole model download with `[WinError 1314] A required privilege is not held by the client`. `huggingface_hub` probes for symlink support itself, but it marks the cache directory supported before running the probe, so a parallel download can read the optimistic answer and then hit 1314 - which is neither `FileExistsError` nor `PermissionError`, so the copy fallback never runs and the error surfaces in the UI as "Download failed".
+
+**Why the package `__init__`:** `huggingface_hub.constants` freezes the environment into module constants at import time, so the variable has to be set before the first import of the Hub. Nothing in `app.py`, `pystereo_core/__main__.py`, or either PyInstaller entry point imports the Hub at startup - all Hub imports are inside functions - so the package init always wins.
+
+**Trade-off:** none worth the name for a first download. With symlinks off, a freshly fetched blob is moved into the snapshot rather than linked, so disk use is unchanged; only a file already shared with another revision gets copied.
