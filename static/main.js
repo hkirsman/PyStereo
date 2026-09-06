@@ -1014,18 +1014,22 @@ const SBS_VIEWS = {
   parallel: {
     anaglyph: false, swap: false,
     note: "Parallel SBS as generated - for a viewer or headset.",
+    alt: "Side-by-side stereo result",
   },
   cross: {
     anaglyph: false, swap: true,
     note: "Panes swapped for cross-eyed free-viewing.",
+    alt: "Side-by-side stereo result, panes swapped for cross-eyed viewing",
   },
   anaglyph: {
     anaglyph: true, swap: false,
     note: "For red-cyan glasses - red lens over the left eye.",
+    alt: "Red-cyan anaglyph stereo result",
   },
   anaglyph_swapped: {
     anaglyph: true, swap: true,
     note: "For reversed glasses - red lens over the right eye.",
+    alt: "Cyan-red anaglyph stereo result",
   },
 };
 
@@ -1034,6 +1038,16 @@ const SBS_VIEW_BUILT_NOTE =
 
 function currentSbsView() {
   return SBS_VIEWS[sbsViewSelect.value] || SBS_VIEWS.parallel;
+}
+
+/** Sync the note and the image's description with the selected view.
+ *  The alt matters twice over: the lightbox copies it along with the
+ *  image, so a stale one follows the result full screen. */
+function applySbsViewText() {
+  const view = currentSbsView();
+  stageViewNote.textContent =
+    view.note + (view.anaglyph || view.swap ? SBS_VIEW_BUILT_NOTE : "");
+  stageSbsImg.alt = view.alt;
 }
 
 /** Put `src` on the SBS stage, dropping the object URL it replaces. */
@@ -1067,10 +1081,8 @@ function blendAnaglyph(left, right) {
 }
 
 async function renderSbsView() {
-  const view = currentSbsView();
-  const { anaglyph, swap } = view;
-  stageViewNote.textContent =
-    view.note + (anaglyph || swap ? SBS_VIEW_BUILT_NOTE : "");
+  const { anaglyph, swap } = currentSbsView();
+  applySbsViewText();
   try {
     localStorage.setItem(SBS_VIEW_KEY, sbsViewSelect.value);
   } catch {}
@@ -1152,9 +1164,7 @@ function restoreSbsView() {
     saved = localStorage.getItem(SBS_VIEW_KEY);
   } catch {}
   if (saved && SBS_VIEWS[saved]) sbsViewSelect.value = saved;
-  const view = currentSbsView();
-  stageViewNote.textContent =
-    view.note + (view.anaglyph || view.swap ? SBS_VIEW_BUILT_NOTE : "");
+  applySbsViewText();
 }
 
 sbsViewSelect.addEventListener("change", renderSbsView);
