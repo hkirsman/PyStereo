@@ -117,6 +117,26 @@ to use PyStereo for AI stereo generation.
 
 Headless equivalent: `python app.py --host 127.0.0.1 --port 8766`
 
+## Tests
+
+```bash
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The suite runs in a few seconds and needs no model weights, no GPU and no
+network: the models are replaced by stand-ins. It covers the HTTP service
+(the on/off switch, request checks, settings, result files, the depth
+output of `/transform`), the output pixel budget, settings from the
+environment, the method registry, cache pruning, the checks that guard
+deleting model files, and the warp on small synthetic arrays. It does not
+run a real model, so a change to depth, warp or inpaint quality still has
+to be looked at in the web UI.
+
+The tests keep their settings, results, caches and logs in temporary
+folders and never touch `settings.json`, `outputs/` or `.sharp_cache/`.
+
 ## Standalone builds (PyInstaller)
 
 With the repo venv active, install PyInstaller (`pip install pyinstaller`), then
