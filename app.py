@@ -925,7 +925,11 @@ def api_stereo_methods() -> Any:
 
 @app.route("/transform", methods=["POST"])
 def transform() -> Any:
-    """Media service endpoint: JPEG in, SBS JPEG bytes out."""
+    """Media service endpoint: JPEG in, SBS JPEG bytes out.
+
+    With the form field ``output=depth`` the answer is the depth map alone,
+    as a PNG (see :func:`_transform_depth`).
+    """
     if not _service_enabled():
         return jsonify({
             "error": "Integration service is off. Enable it in the PyStereo web UI.",
@@ -952,6 +956,14 @@ def transform() -> Any:
             max_pixels = max(0, int(max_pixels_raw))
         except ValueError:
             LOGGER.warning("Ignoring invalid max_pixels %r", max_pixels_raw)
+
+    output = (request.form.get("output") or "sbs").strip().lower()
+    if output == "depth":
+        return _transform_depth(upload, name, depth_model, max_dim_raw, max_pixels)
+    if output != "sbs":
+        return jsonify({
+            "error": f"Unknown output {output!r}. Use 'sbs' or 'depth'.",
+        }), 400
 
     effective_method = method_override or _get_pipeline().settings.stereo_method
     method_needs_depth = True
@@ -1037,6 +1049,105 @@ def transform() -> Any:
         mimetype="image/jpeg",
         headers={
             "Content-Disposition": 'attachment; filename="stereo.jpg"',
+            "Content-Length": str(len(payload)),
+        },
+    )
+
+
+def _transform_depth(
+    upload: Any,
+    name: str,
+    depth_model: str,
+    max_dim_raw: str,
+    max_pixels: int,
+) -> Any:
+    """Answer ``/transform`` with the depth map instead of a stereo pair.
+
+    A greyscale PNG, white nearest and black farthest: the map the web UI
+    saves as ``depth.png`` for a depth-map method. Always Depth Anything's,
+    whatever stereo method is selected, so the answer does not change with
+    the method. No warp and no inpainting run.
+
+    ``max_dim`` bounds the image the model is given and ``max_pixels`` the
+    area of the map sent back, as they do for the stereo pair. The form
+    field ``depth_bits=16`` asks for a 16-bit PNG: 256 levels can show as
+    steps on a smooth surface once the depth is turned into geometry.
+    """
+    import numpy as np
+
+    from pystereo_core.depth import DEPTH_MODELS
+    from pystereo_core.download import get_download_manager
+
+    if depth_model not in DEPTH_MODELS:
+        return jsonify({
+            "error": f"Unknown depth_model {depth_model!r}."
+            f" Use one of: {', '.join(DEPTH_MODELS)}.",
+        }), 400
+    bits_raw = (request.form.get("depth_bits") or "8").strip()
+    if bits_raw not in ("8", "16"):
+        return jsonify({
+            "error": f"Unknown depth_bits {bits_raw!r}. Use 8 or 16.",
+        }), 400
+    sixteen = bits_raw == "16"
+
+    # Only this model is needed, not the whole stereo pack.
+    if not get_download_manager().is_depth_model_local(depth_model):
+        gui_log(f"  Failed - depth model '{depth_model}' not downloaded")
+        return _model_not_ready_response()
+    _ensure_registry(model_size=depth_model)
+    gui_log(f"Generating depth map for {name}...")
+
+    t0 = time.perf_counter()
+    try:
+        with PREDICT_LOCK:
+            rgb_pil = Image.open(upload.stream).convert("RGB")
+            w, h = rgb_pil.size
+            if max_dim_raw:
+                try:
+                    max_dim = max(512, int(max_dim_raw))
+                    rgb_pil.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                except ValueError:
+                    pass
+            gui_log(f"  Running depth ({rgb_pil.size[0]}x{rgb_pil.size[1]})...")
+
+            depth_estimator = _get_depth_estimator()
+            if depth_estimator is None:
+                gui_log("  Failed - depth model not loaded")
+                return jsonify({"error": "Depth model not loaded"}), 503
+            depth_f32 = depth_estimator.process_raw(rgb_pil)
+    except Exception:
+        LOGGER.exception("Depth estimation failed for %s", name)
+        gui_log(f"  Failed - {name} (see terminal for details)")
+        return jsonify(_inference_failed_payload()), 500
+
+    # Fitted as floats, so a 16-bit map is not resampled from 8-bit steps.
+    depth_img = Image.fromarray(depth_f32.astype(np.float32, copy=False))
+    if max_pixels:
+        from pystereo_core.stereo.fit import fit_to_pixel_budget
+
+        depth_img = fit_to_pixel_budget(depth_img, max_pixels)
+    levels = 65535 if sixteen else 255
+    depth_int = np.rint(
+        np.clip(np.asarray(depth_img, dtype=np.float32), 0.0, 1.0) * levels,
+    ).astype(np.uint16 if sixteen else np.uint8)
+
+    buf = io.BytesIO()
+    Image.fromarray(depth_int).save(buf, format="PNG")
+    payload = buf.getvalue()
+
+    elapsed = time.perf_counter() - t0
+    LOGGER.info(
+        "Depth map for %s (%dx%d -> %dx%d, model=%s, %s-bit) in %.1fs",
+        name, w, h, depth_img.size[0], depth_img.size[1],
+        depth_model, bits_raw, elapsed,
+    )
+    gui_log(f"  Done - {name} ({elapsed:.1f}s)")
+
+    return Response(
+        payload,
+        mimetype="image/png",
+        headers={
+            "Content-Disposition": 'attachment; filename="depth.png"',
             "Content-Length": str(len(payload)),
         },
     )
