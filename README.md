@@ -67,7 +67,8 @@ python -m pystereo_core --cli --folder /path/to/photos --recursive
 The web UI and the desktop GUI both expose HTTP endpoints for integration:
 
 - `GET /health` - returns `{"ok": true, "kind": "stereo"}`
-- `POST /transform` - accepts a JPEG/PNG upload, returns an SBS JPEG
+- `POST /transform` - accepts a JPEG/PNG upload, returns an SBS JPEG, or
+  the depth map alone with `output=depth`
 
 The service is off by default: `/health` answers 503 and `/transform` 403
 until it is enabled. Turn it on under "Integration service" in the web UI
@@ -82,6 +83,21 @@ the result is downscaled just before encoding, so callers with a fixed
 display budget (a headset, say) do not receive a 50 MP JPEG they will only
 shrink. `no_cache=1` ignores SHARP predictions cached on disk and runs the
 network again (for timing comparisons); loaded models stay resident.
+
+`output=depth` returns the depth map in place of the stereo pair: a
+greyscale PNG, white nearest and black farthest. Nothing is warped or
+inpainted, so it takes about as long as the depth model alone (a fraction
+of a second once the model is loaded). It is always the Depth Anything
+map, whatever stereo method is selected, and needs only that model
+downloaded: `method` is ignored. `depth_model` picks the model, `max_dim`
+bounds the image it is given and `max_pixels` the area of the map sent
+back; with neither, the map has the photo's size. `depth_bits=16` returns
+a 16-bit PNG, for callers that turn the depth into geometry and would
+see 256 levels as steps on a smooth surface.
+
+```bash
+curl -F file=@photo.jpg -F output=depth -o depth.png http://127.0.0.1:8766/transform
+```
 
 ### Caches
 

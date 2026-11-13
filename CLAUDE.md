@@ -34,7 +34,7 @@ python -m pystereo_core --cli --folder /path --recursive  # CLI batch mode
 
 Both the web UI and desktop GUI expose:
 - `GET /health` - `{"ok": true, "kind": "stereo"}`
-- `POST /transform` - accepts JPEG/PNG upload, returns SBS JPEG. Optional form fields: `method`, `depth_model`, `max_dim`, `max_pixels`
+- `POST /transform` - accepts JPEG/PNG upload, returns SBS JPEG. Optional form fields: `method`, `depth_model`, `max_dim`, `max_pixels`. `output=depth` returns the Depth Anything map as a PNG instead (`depth_bits=16` for 16-bit); no warp or inpaint runs
 
 Off by default (`/health` 503, `/transform` 403). Enabled by the web UI
 setting `service_enabled`, `PYSTEREO_SERVICE=1`, or the desktop GUI's
