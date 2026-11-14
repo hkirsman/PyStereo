@@ -192,11 +192,18 @@ def test_a_missing_result_file_is_not_found(web: ModuleType, client: Any) -> Non
     assert client.get(f"/api/results/{uuid.uuid4()}/sbs.jpg").status_code == 404
 
 
-@pytest.mark.parametrize("result_id", ["..", "outputs", "not-a-uuid", "."])
+@pytest.mark.parametrize("result_id", ["..", ".", "outputs", "not-a-uuid"])
 def test_a_result_id_must_be_a_uuid(web: ModuleType, client: Any, result_id: str) -> None:
+    """A file is there at each of these places, so "not found" cannot stand in
+    for the check: only the check on the id keeps the file from being sent."""
+    place = web.OUTPUTS_DIR / result_id
+    place.mkdir(exist_ok=True)
+    (place / "sbs.jpg").write_bytes(b"jpeg bytes")
+    assert (web.OUTPUTS_DIR / result_id / "sbs.jpg").is_file()
+
     answer = client.get(f"/api/results/{result_id}/sbs.jpg")
-    assert answer.status_code in (400, 404)
-    assert answer.data != b"jpeg bytes"
+    assert answer.status_code == 400
+    assert answer.get_json() == {"error": "Invalid result id"}
 
 
 @pytest.mark.parametrize(
