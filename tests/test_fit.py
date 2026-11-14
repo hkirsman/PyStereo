@@ -57,4 +57,24 @@ def test_an_edge_beyond_the_texture_limit_is_brought_inside_it() -> None:
 
 def test_a_tiny_budget_still_leaves_a_pixel() -> None:
     out = fit_to_pixel_budget(_image(4000, 10), 1)
-    assert out.size[0] >= 1 and out.size[1] >= 1
+    assert out.size == (1, 1)
+
+
+def test_the_budget_holds_when_one_side_is_down_to_a_pixel() -> None:
+    # 4000 x 10 scaled to 100 pixels would be 200 x 0.5. The short side stops
+    # at one pixel, so the long side gives way and the shape is not kept.
+    assert fit_to_pixel_budget(_image(4000, 10), 100).size == (100, 1)
+    assert fit_to_pixel_budget(_image(10, 4000), 100).size == (1, 100)
+
+
+def test_the_area_never_exceeds_the_budget() -> None:
+    shapes = [(4000, 3000), (3000, 4000), (4000, 10), (10, 4000), (5000, 1), (333, 77)]
+    for width, height in shapes:
+        for budget in (1, 2, 7, 100, 999, 12_345, 1_000_000):
+            for even_width in (False, True):
+                out = fit_to_pixel_budget(_image(width, height), budget, even_width=even_width)
+                w, h = out.size
+                case = f"{width}x{height} into {budget}, even_width={even_width}: {w}x{h}"
+                assert w >= 1 and h >= 1, case
+                assert w * h <= budget, case
+                assert w <= width and h <= height, case

@@ -50,7 +50,7 @@ Headless: `python app.py --host 127.0.0.1 --port 8766`
 .venv/bin/python3 -m pytest tests/test_transform_depth.py  # one file
 ```
 
-Tests live in `tests/` and need no weights, GPU or network: models are replaced by stand-ins (`tests/test_transform_depth.py` shows how). Expected: 215 passed.
+Tests live in `tests/` and need no weights, GPU or network: models are replaced by stand-ins (`tests/test_transform_depth.py` shows how). Expected: 217 passed.
 
 - `tests/conftest.py` points settings, `outputs/`, the SHARP cache and the log folder at temporary folders. Take `app.py` through the `web` / `client` / `service_on` fixtures, never with a bare `import app`, so a test cannot touch the real files. Saving `sharp_cache_max_mb` prunes the SHARP cache at once, which is why its folder is swapped too.
 - No test runs a real model. A change to depth, warp or inpaint quality is still verified by running the web UI (`python app.py`) and processing a photo.
