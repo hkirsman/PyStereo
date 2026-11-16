@@ -1,0 +1,6 @@
+# Test dependencies, on top of the runtime ones.
+#   pip install -r requirements-dev.txt
+#   python -m pytest
+-r requirements.txt
+
+pytest>=8
