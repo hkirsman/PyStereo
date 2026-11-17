@@ -11,6 +11,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from pystereo_core.registry import AIModel, ModelRegistry
+
 PHOTO_SIZE = (1200, 800)
 
 
@@ -37,19 +39,24 @@ class FakeDownloads:
 @pytest.fixture
 def estimator(service_on: ModuleType, monkeypatch: pytest.MonkeyPatch) -> FakeEstimator:
     """The service on, the small depth model "downloaded", no real model."""
+    fake = FakeEstimator()
+    _small_model_only(service_on, monkeypatch)
+    monkeypatch.setattr(service_on, "_ensure_registry", lambda model_size="small": None)
+    monkeypatch.setattr(service_on, "_get_depth_estimator", lambda **kw: fake)
+    return fake
+
+
+def _small_model_only(service_on: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the small depth model downloaded, and no stereo pipeline."""
     from pystereo_core import download
 
-    fake = FakeEstimator()
     monkeypatch.setattr(download, "get_download_manager", lambda: FakeDownloads({"small"}))
-    monkeypatch.setattr(service_on, "_ensure_registry", lambda model_size="small": None)
-    monkeypatch.setattr(service_on, "_get_depth_estimator", lambda: fake)
     monkeypatch.setattr(service_on, "_model_status_payload", lambda: {"state": "missing"})
 
     def no_stereo() -> Any:
         raise AssertionError("the stereo pipeline must not run for a depth map")
 
     monkeypatch.setattr(service_on, "_get_pipeline", no_stereo)
-    return fake
 
 
 def _photo(size: tuple[int, int] = PHOTO_SIZE) -> io.BytesIO:
@@ -198,9 +205,79 @@ def test_no_estimator_answers_503(
     estimator: FakeEstimator, service_on: ModuleType, client: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(service_on, "_get_depth_estimator", lambda: None)
+    monkeypatch.setattr(service_on, "_get_depth_estimator", lambda **kw: None)
     assert _depth(client).status_code == 503
 
 
 def test_the_service_switch_applies_to_depth_too(web: ModuleType, client: Any) -> None:
     assert _depth(client).status_code == 403
+
+
+class FakeDepthModel(AIModel):
+    """A depth model the real registry can load, holding the ramp estimator."""
+
+    name = "fake depth"
+    capability = "depth"
+
+    def __init__(self, model_size: str) -> None:
+        self.model_size = model_size
+        self.loaded = False
+        self.ramp = FakeEstimator()
+
+    def load(self, device: str) -> None:
+        self.loaded = True
+
+    def unload(self) -> None:
+        self.loaded = False
+
+    def is_loaded(self) -> bool:
+        return self.loaded
+
+    def process(self, image: Image.Image, **kwargs: Any) -> Image.Image:
+        raise NotImplementedError
+
+    def process_raw(self, image: Image.Image) -> np.ndarray:
+        return self.ramp.process_raw(image)
+
+
+@pytest.fixture
+def registry(service_on: ModuleType, monkeypatch: pytest.MonkeyPatch) -> ModelRegistry:
+    """A fresh registry behind the real model lookup, CPU only, and a
+    switch that registers the stand-in model for the size asked for."""
+    from pystereo_core import registry as registry_module
+
+    fresh = ModelRegistry()
+    fresh._detected, fresh._device = True, "cpu"
+    monkeypatch.setattr(registry_module, "_registry", fresh)
+    _small_model_only(service_on, monkeypatch)
+    monkeypatch.setattr(
+        service_on, "_ensure_registry",
+        lambda model_size="small": fresh.register(FakeDepthModel(model_size)),
+    )
+    return fresh
+
+
+def test_the_real_lookup_loads_the_model_without_the_stereo_pack(
+    registry: ModelRegistry, client: Any,
+) -> None:
+    """Only the small depth model is downloaded and the stand-in download
+    manager has no ``is_pack_ready``: the model still loads and answers."""
+    img = _png(_depth(client))
+    assert img.size == PHOTO_SIZE
+    model = registry._models["depth"]
+    assert model.is_loaded()
+
+
+def test_the_model_is_switched_holding_the_predict_lock(
+    estimator: FakeEstimator, service_on: ModuleType, client: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Switched outside the lock, a request for another depth model could
+    swap it out between this request's switch and its run."""
+    held: list[bool] = []
+    monkeypatch.setattr(
+        service_on, "_ensure_registry",
+        lambda model_size="small": held.append(service_on.PREDICT_LOCK.locked()),
+    )
+    assert _depth(client).status_code == 200
+    assert held == [True]

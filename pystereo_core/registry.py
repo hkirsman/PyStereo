@@ -136,11 +136,16 @@ class ModelRegistry:
         """Return True if a model is registered for *capability*."""
         return capability in self._models
 
-    def get(self, capability: str) -> Optional[AIModel]:
+    def get(self, capability: str, *, pack_needed: bool = True) -> Optional[AIModel]:
         """Return the model for *capability*, loading from local cache if needed.
 
         Returns ``None`` when AI is disabled, the capability is off, weights
         are still downloading, or local load fails. Never hits the Hub.
+
+        A depth model loads only once the whole stereo pack is cached, since
+        a stereo pair needs the segmenter and inpainter too. With
+        *pack_needed* False, for a depth map alone, its own weights are
+        enough.
         """
         with self._lock:
             model = self._models.get(capability)
@@ -153,12 +158,14 @@ class ModelRegistry:
             if model.is_loaded():
                 return model
 
-        # Depth / stereo pack must be fully cached before first load.
         if capability == "depth":
             from pystereo_core.download import get_download_manager
 
             mgr = get_download_manager()
-            if mgr.is_downloading() or not mgr.is_pack_ready():
+            if pack_needed:
+                if mgr.is_downloading() or not mgr.is_pack_ready():
+                    return None
+            elif not mgr.is_depth_model_local(getattr(model, "model_size", "")):
                 return None
 
         with self._lock:

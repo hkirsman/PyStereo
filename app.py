@@ -240,16 +240,25 @@ def get_pipeline() -> Any:
     return _get_pipeline()
 
 
-def _get_depth_estimator() -> Any:
-    """Return the depth estimator from the registry, or None."""
+def _get_depth_estimator(pack_needed: bool = True) -> Any:
+    """Return the depth estimator from the registry, or None.
+
+    *pack_needed* False for a depth map alone: the depth model's own weights
+    are enough, the rest of the stereo pack is not used.
+    """
     from pystereo_core.registry import get_registry
 
     registry = get_registry()
-    return registry.get("depth")
+    return registry.get("depth", pack_needed=pack_needed)
 
 
 def _ensure_registry(model_size: str = "small") -> None:
-    """Register the depth estimator if not already done, or switch model size."""
+    """Register the depth estimator if not already done, or switch model size.
+
+    A request calls this holding ``PREDICT_LOCK``, with the lookup and the
+    inference: a switch for another request between them would unload the
+    model this one runs, or hand it the other's.
+    """
     from pystereo_core.depth import DepthEstimator
     from pystereo_core.registry import get_registry
 
@@ -978,7 +987,6 @@ def transform() -> Any:
         if blocked is not None:
             gui_log("  Failed - stereo model not ready (download required)")
             return blocked
-        _ensure_registry(model_size=depth_model)
     gui_log(f"Generating stereo SBS for {name}...")
 
     t0 = time.perf_counter()
@@ -988,6 +996,8 @@ def transform() -> Any:
             w, h = rgb_pil.size
             gui_log(f"  Running depth + stereo ({w}x{h})...")
 
+            if method_needs_depth:
+                _ensure_registry(model_size=depth_model)
             depth_estimator = _get_depth_estimator()
             if depth_estimator is None and method_needs_depth:
                 gui_log("  Failed - depth model not loaded")
@@ -1094,12 +1104,12 @@ def _transform_depth(
     if not get_download_manager().is_depth_model_local(depth_model):
         gui_log(f"  Failed - depth model '{depth_model}' not downloaded")
         return _model_not_ready_response()
-    _ensure_registry(model_size=depth_model)
     gui_log(f"Generating depth map for {name}...")
 
     t0 = time.perf_counter()
     try:
         with PREDICT_LOCK:
+            _ensure_registry(model_size=depth_model)
             rgb_pil = Image.open(upload.stream).convert("RGB")
             w, h = rgb_pil.size
             if max_dim_raw:
@@ -1110,7 +1120,7 @@ def _transform_depth(
                     pass
             gui_log(f"  Running depth ({rgb_pil.size[0]}x{rgb_pil.size[1]})...")
 
-            depth_estimator = _get_depth_estimator()
+            depth_estimator = _get_depth_estimator(pack_needed=False)
             if depth_estimator is None:
                 gui_log("  Failed - depth model not loaded")
                 return jsonify({"error": "Depth model not loaded"}), 503
@@ -1197,7 +1207,6 @@ def api_generate() -> Any:
         blocked = _require_model_ready()
         if blocked is not None:
             return blocked
-        _ensure_registry(model_size=depth_model)
 
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     result_id = str(uuid.uuid4())
@@ -1241,6 +1250,7 @@ def api_generate() -> Any:
                     intermediates=sharp_intermediates,
                 )
             else:
+                _ensure_registry(model_size=depth_model)
                 depth_estimator = _get_depth_estimator()
                 if depth_estimator is None:
                     shutil.rmtree(result_dir, ignore_errors=True)
