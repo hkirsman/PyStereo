@@ -50,6 +50,10 @@ def fit_to_pixel_budget(
         scale = (max_pixels / (w * h)) ** 0.5
         w = max(1, int(w * scale))
         h = max(1, int(h * scale))
+        # A side that stops at one pixel leaves the area over the budget: the
+        # other side gives way, as the shape cannot be kept below a pixel.
+        if w * h > max_pixels:
+            w, h = min(w, max_pixels), min(h, max_pixels)
 
     if even_width and w % 2 and w > 1:
         w -= 1

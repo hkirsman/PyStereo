@@ -67,7 +67,8 @@ python -m pystereo_core --cli --folder /path/to/photos --recursive
 The web UI and the desktop GUI both expose HTTP endpoints for integration:
 
 - `GET /health` - returns `{"ok": true, "kind": "stereo"}`
-- `POST /transform` - accepts a JPEG/PNG upload, returns an SBS JPEG
+- `POST /transform` - accepts a JPEG/PNG upload, returns an SBS JPEG, or
+  the depth map alone with `output=depth`
 
 The service is off by default: `/health` answers 503 and `/transform` 403
 until it is enabled. Turn it on under "Integration service" in the web UI
@@ -82,6 +83,21 @@ the result is downscaled just before encoding, so callers with a fixed
 display budget (a headset, say) do not receive a 50 MP JPEG they will only
 shrink. `no_cache=1` ignores SHARP predictions cached on disk and runs the
 network again (for timing comparisons); loaded models stay resident.
+
+`output=depth` returns the depth map in place of the stereo pair: a
+greyscale PNG, white nearest and black farthest. Nothing is warped or
+inpainted, so it takes about as long as the depth model alone (a fraction
+of a second once the model is loaded). It is always the Depth Anything
+map, whatever stereo method is selected, and needs only that model
+downloaded: `method` is ignored. `depth_model` picks the model, `max_dim`
+bounds the image it is given and `max_pixels` the area of the map sent
+back; with neither, the map has the photo's size. `depth_bits=16` returns
+a 16-bit PNG, for callers that turn the depth into geometry and would
+see 256 levels as steps on a smooth surface.
+
+```bash
+curl -F file=@photo.jpg -F output=depth -o depth.png http://127.0.0.1:8766/transform
+```
 
 ### Caches
 
@@ -100,6 +116,26 @@ Any application can point its stereo service URL to `http://127.0.0.1:8766`
 to use PyStereo for AI stereo generation.
 
 Headless equivalent: `python app.py --host 127.0.0.1 --port 8766`
+
+## Tests
+
+```bash
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The suite runs in a few seconds and needs no model weights, no GPU and no
+network: the models are replaced by stand-ins. It covers the HTTP service
+(the on/off switch, request checks, settings, result files, the depth
+output of `/transform`), the output pixel budget, settings from the
+environment, the method registry, cache pruning, the checks that guard
+deleting model files, and the warp on small synthetic arrays. It does not
+run a real model, so a change to depth, warp or inpaint quality still has
+to be looked at in the web UI.
+
+The tests keep their settings, results, caches and logs in temporary
+folders and never touch `settings.json`, `outputs/` or `.sharp_cache/`.
 
 ## Standalone builds (PyInstaller)
 
