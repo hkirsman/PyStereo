@@ -84,6 +84,12 @@ display budget (a headset, say) do not receive a 50 MP JPEG they will only
 shrink. `no_cache=1` ignores SHARP predictions cached on disk and runs the
 network again (for timing comparisons); loaded models stay resident.
 
+The stereo pair's answer carries the header `X-Result-Cached`: `1` when the
+SHARP prediction came from the disk cache, `0` otherwise (a new photo, the
+cache off, or a method that does not use SHARP). A cached answer takes a few
+seconds, a new photo many times that, so a caller that times its requests to
+show an estimate can leave the cached ones out.
+
 `output=depth` returns the depth map in place of the stereo pair: a
 greyscale PNG, white nearest and black farthest. Nothing is warped or
 inpainted, so it takes about as long as the depth model alone (a fraction
