@@ -936,6 +936,9 @@ def api_stereo_methods() -> Any:
 def transform() -> Any:
     """Media service endpoint: JPEG in, SBS JPEG bytes out.
 
+    The header ``X-Result-Cached`` is ``1`` when SHARP's prediction came from
+    the disk cache, ``0`` otherwise.
+
     With the form field ``output=depth`` the answer is the depth map alone,
     as a PNG (see :func:`_transform_depth`).
     """
@@ -1014,14 +1017,19 @@ def transform() -> Any:
             if _form_flag("no_cache"):
                 overrides["sharp_disk_cache"] = False
 
+            # Read back for X-Result-Cached: whether SHARP's prediction came
+            # from the disk cache.
+            intermediates: dict[str, Any] = {}
             if overrides:
                 local_pipeline = pipeline.derive(**overrides)
                 sbs_img = local_pipeline.synthesize_with_depth_estimator(
                     rgb_pil, depth_estimator, method=method_override,
+                    intermediates=intermediates,
                 )
             else:
                 sbs_img = pipeline.synthesize_with_depth_estimator(
                     rgb_pil, depth_estimator, method=method_override,
+                    intermediates=intermediates,
                 )
     except Exception:
         LOGGER.exception("Inference failed for %s", name)
@@ -1060,6 +1068,9 @@ def transform() -> Any:
         headers={
             "Content-Disposition": 'attachment; filename="stereo.jpg"',
             "Content-Length": str(len(payload)),
+            # A cached answer takes seconds, a new photo many times that: a
+            # client timing the calls for an estimate can leave these out.
+            "X-Result-Cached": "1" if intermediates.get("sharp_cache") == "hit" else "0",
         },
     )
 

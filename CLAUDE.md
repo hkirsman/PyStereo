@@ -34,7 +34,7 @@ python -m pystereo_core --cli --folder /path --recursive  # CLI batch mode
 
 Both the web UI and desktop GUI expose:
 - `GET /health` - `{"ok": true, "kind": "stereo"}`
-- `POST /transform` - accepts JPEG/PNG upload, returns SBS JPEG. Optional form fields: `method`, `depth_model`, `max_dim`, `max_pixels`. `output=depth` returns the Depth Anything map as a PNG instead (`depth_bits=16` for 16-bit); no warp or inpaint runs
+- `POST /transform` - accepts JPEG/PNG upload, returns SBS JPEG. Optional form fields: `method`, `depth_model`, `max_dim`, `max_pixels`. `output=depth` returns the Depth Anything map as a PNG instead (`depth_bits=16` for 16-bit); no warp or inpaint runs. The SBS answer carries `X-Result-Cached: 1` when SHARP's prediction came from `.sharp_cache/`, else `0`, so a client timing the calls can leave cached ones out
 
 Off by default (`/health` 503, `/transform` 403). Enabled by the web UI
 setting `service_enabled`, `PYSTEREO_SERVICE=1`, or the desktop GUI's
@@ -50,7 +50,7 @@ Headless: `python app.py --host 127.0.0.1 --port 8766`
 .venv/bin/python3 -m pytest tests/test_transform_depth.py  # one file
 ```
 
-Tests live in `tests/` and need no weights, GPU or network: models are replaced by stand-ins (`tests/test_transform_depth.py` shows how). Expected: 219 passed.
+Tests live in `tests/` and need no weights, GPU or network: models are replaced by stand-ins (`tests/test_transform_depth.py` shows how). Expected: 224 passed.
 
 - `tests/conftest.py` points settings, `outputs/`, the SHARP cache and the log folder at temporary folders. Take `app.py` through the `web` / `client` / `service_on` fixtures, never with a bare `import app`, so a test cannot touch the real files. Saving `sharp_cache_max_mb` prunes the SHARP cache at once, which is why its folder is swapped too.
 - No test runs a real model. A change to depth, warp or inpaint quality is still verified by running the web UI (`python app.py`) and processing a photo.
